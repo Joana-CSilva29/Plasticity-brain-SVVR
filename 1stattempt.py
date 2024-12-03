@@ -1,5 +1,6 @@
 import vtk
 from collections import defaultdict
+import random
 
 
 def read_positions(file_path):
@@ -21,13 +22,16 @@ def read_positions(file_path):
                     continue
                 points.InsertNextPoint(x, y, z)
                 areas.add(area)
-                if area not in area_to_id:
-                    area_to_id[area] = len(area_to_id)
-                point_areas.append(area_to_id[area])
+                point_areas.append(area)  # Store the original area name
     except FileNotFoundError:
         print(f"File {file_path} not found.")
         return None, None, None
-    return points, areas, point_areas
+
+    # Sort the areas by their numeric part, then assign the IDs
+    sorted_areas = sorted(areas, key=lambda x: int(x.split('_')[1]))  # Sorting by the numeric part of 'area_X'
+    area_to_id = {area: idx for idx, area in enumerate(sorted_areas)}  # Reassign area ids based on sorted order
+
+    return points, areas, point_areas, area_to_id  # Return area_to_id
 
 
 def read_network_connections(file_path):
@@ -63,64 +67,125 @@ def calculate_area_centroids(points, point_areas):
     return centroids
 
 
-def create_area_polydata(area_centroids, connection_counts):
+def create_colored_glyphs(points, point_areas, area_to_id, num_areas):
+    """Create vtkPolyData for neuron glyphs with area-based colors."""
+    polydata = vtk.vtkPolyData()
+    polydata.SetPoints(points)
+
+    # Add area-based colors
+    colors = vtk.vtkUnsignedCharArray()
+    colors.SetName("Colors")
+    colors.SetNumberOfComponents(3)
+
+    # Assign unique colors to each area using a lookup table
+    lut = vtk.vtkLookupTable()
+    lut.SetNumberOfTableValues(num_areas)  # Ensure the number of colors matches the number of areas
+    lut.Build()
+
+    # Assign random colors to each area
+    for i in range(num_areas):
+        lut.SetTableValue(i, random.random(), random.random(), random.random(), 1.0)
+
+    # Set colors for each point based on the area it belongs to
+    for area_id in point_areas:
+        # Get the integer index for the area (from the sorted area_to_id mapping)
+        index = area_to_id[area_id]  # area_id is now a string, area_to_id maps it to a unique integer
+        rgb = lut.GetTableValue(index)  # Get color from lookup table based on the index
+        colors.InsertNextTuple3(int(255 * rgb[0]), int(255 * rgb[1]), int(255 * rgb[2]))
+
+    polydata.GetPointData().SetScalars(colors)
+
+    # Create glyphs (spheres) for neuron points
+    glyph_source = vtk.vtkSphereSource()
+    glyph_source.SetRadius(0.005)  # Fixed small size for nodes
+
+    glyph_filter = vtk.vtkGlyph3D()
+    glyph_filter.SetSourceConnection(glyph_source.GetOutputPort())
+    glyph_filter.SetInputData(polydata)
+    glyph_filter.Update()
+
+    mapper = vtk.vtkPolyDataMapper()
+    mapper.SetInputConnection(glyph_filter.GetOutputPort())
+    mapper.SetScalarModeToUsePointData()  # Use point data for coloring
+
+    actor = vtk.vtkActor()
+    actor.SetMapper(mapper)
+    return actor
+
+
+def create_area_connections(area_centroids, in_connections, out_connections, point_areas):
     """Create vtkPolyData for area-level connections."""
     points = vtk.vtkPoints()
     lines = vtk.vtkCellArray()
+    radii = vtk.vtkDoubleArray()
+    radii.SetName("TubeRadius")
 
     # Map area IDs to point indices in vtkPoints
     area_id_to_point_id = {}
     for area_id, centroid in area_centroids.items():
         area_id_to_point_id[area_id] = points.InsertNextPoint(centroid)
 
-    # Create connections between area centroids
-    for (area1, area2), count in connection_counts.items():
+    # Count connections for in and out separately
+    connection_counts = defaultdict(lambda: [0, 0])  # [in_count, out_count]
+
+    for source_id, target_id in in_connections:
+        if source_id < len(point_areas) and target_id < len(point_areas):
+            area1 = point_areas[source_id]
+            area2 = point_areas[target_id]
+            connection_counts[(area1, area2)][0] += 1  # Increment in-count
+
+    for source_id, target_id in out_connections:
+        if source_id < len(point_areas) and target_id < len(point_areas):
+            area1 = point_areas[source_id]
+            area2 = point_areas[target_id]
+            connection_counts[(area1, area2)][1] += 1  # Increment out-count
+
+    # Create tubes for connections
+    for (area1, area2), (in_count, out_count) in connection_counts.items():
         if area1 in area_id_to_point_id and area2 in area_id_to_point_id:
-            lines.InsertNextCell(2)
-            lines.InsertCellPoint(area_id_to_point_id[area1])
-            lines.InsertCellPoint(area_id_to_point_id[area2])
+            # Create tube for in-connections
+            line = vtk.vtkLine()
+            line.GetPointIds().SetId(0, area_id_to_point_id[area1])
+            line.GetPointIds().SetId(1, area_id_to_point_id[area2])
+            lines.InsertNextCell(line)
+            radii.InsertNextValue(0.1 * in_count)  # Scale by in-count
+
+            # Create tube for out-connections
+            line = vtk.vtkLine()
+            line.GetPointIds().SetId(0, area_id_to_point_id[area2])
+            line.GetPointIds().SetId(1, area_id_to_point_id[area1])
+            lines.InsertNextCell(line)
+            radii.InsertNextValue(0.1 * out_count)  # Scale by out-count
 
     polydata = vtk.vtkPolyData()
     polydata.SetPoints(points)
     polydata.SetLines(lines)
+    polydata.GetCellData().AddArray(radii)
+    polydata.GetCellData().SetActiveScalars("TubeRadius")
 
     return polydata
 
 
-def create_actor_from_polydata(polydata, is_glyph=False, radius=0.5, color=(1, 0, 0)):
-    """Create an actor for either glyphs or lines."""
-    if is_glyph:
-        # Glyph for neuron points
-        glyph_source = vtk.vtkSphereSource()
-        glyph_source.SetRadius(radius)
+def create_tube_actor(polydata):
+    """Create a VTK actor for the tubes."""
+    tube_filter = vtk.vtkTubeFilter()
+    tube_filter.SetInputData(polydata)
+    tube_filter.SetVaryRadiusToVaryRadiusByScalar()
+    tube_filter.SetNumberOfSides(50)
+    tube_filter.CappingOn()
+    tube_filter.Update()
 
-        glyph_filter = vtk.vtkGlyph3D()
-        glyph_filter.SetSourceConnection(glyph_source.GetOutputPort())
-        glyph_filter.SetInputData(polydata)
-        glyph_filter.Update()
-
-        mapper = vtk.vtkPolyDataMapper()
-        mapper.SetInputConnection(glyph_filter.GetOutputPort())
-    else:
-        # Tube for connections
-        tube_filter = vtk.vtkTubeFilter()
-        tube_filter.SetInputData(polydata)
-        tube_filter.SetRadius(radius)
-        tube_filter.SetNumberOfSides(50)
-        tube_filter.CappingOn()
-        tube_filter.Update()
-
-        mapper = vtk.vtkPolyDataMapper()
-        mapper.SetInputConnection(tube_filter.GetOutputPort())
+    mapper = vtk.vtkPolyDataMapper()
+    mapper.SetInputConnection(tube_filter.GetOutputPort())
 
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
-    actor.GetProperty().SetColor(*color)
+    actor.GetProperty().SetColor(0.5, 0.5, 0.5)  # Fixed grey color for tubes
     return actor
 
 
 def main():
-    global base_path, renderer, render_window
+    global base_path, renderer, render_window, area_to_id
 
     # File paths and timestep configuration
     base_path = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network'
@@ -129,7 +194,7 @@ def main():
     in_network_file = f'{base_path}/network/rank_0_step_{initial_timestep}_in_network.txt'
     out_network_file = f'{base_path}/network/rank_0_step_{initial_timestep}_out_network.txt'
 
-    points, areas, point_areas = read_positions(positions_file)
+    points, areas, point_areas, area_to_id = read_positions(positions_file)
     if points is None:
         print("Unable to load positions data. Exiting.")
         return
@@ -138,43 +203,25 @@ def main():
     in_connections = read_network_connections(in_network_file)
     out_connections = read_network_connections(out_network_file)
 
-    # Count connections between areas
-    connection_counts = defaultdict(int)
-    if in_connections is not None:
-        for source_id, target_id in in_connections:
-            if source_id < len(point_areas) and target_id < len(point_areas):
-                area1 = point_areas[source_id]
-                area2 = point_areas[target_id]
-                connection_counts[(area1, area2)] += 1
-
-    if out_connections is not None:
-        for source_id, target_id in out_connections:
-            if source_id < len(point_areas) and target_id < len(point_areas):
-                area1 = point_areas[source_id]
-                area2 = point_areas[target_id]
-                connection_counts[(area1, area2)] += 1
-
     # Calculate centroids for areas
     area_centroids = calculate_area_centroids(points, point_areas)
 
-    # Create area-level polydata and actor
-    area_polydata = create_area_polydata(area_centroids, connection_counts)
-    area_connection_actor = create_actor_from_polydata(area_polydata, is_glyph=False, radius=1.0, color=(0.2, 0.2, 0.2))
+    # Create area connections
+    area_connections_polydata = create_area_connections(area_centroids, in_connections, out_connections, point_areas)
+    connection_actor = create_tube_actor(area_connections_polydata)
 
-    # Create neuron glyphs
-    neuron_polydata = vtk.vtkPolyData()
-    neuron_polydata.SetPoints(points)
-    neuron_actor = create_actor_from_polydata(neuron_polydata, is_glyph=True, radius=0.5, color=(1, 0, 0))
+    # Create neuron glyphs with area-based colors
+    neuron_actor = create_colored_glyphs(points, point_areas, area_to_id, len(areas))
 
     # VTK rendering setup
     renderer = vtk.vtkRenderer()
     render_window = vtk.vtkRenderWindow()
     render_window.AddRenderer(renderer)
-    render_window.SetSize(800, 600)
+    render_window.SetSize(1000, 800)
     renderer.SetBackground(1, 1, 1)  # Set background to white
 
     # Add actors to renderer
-    renderer.AddActor(area_connection_actor)
+    renderer.AddActor(connection_actor)
     renderer.AddActor(neuron_actor)
 
     # Start the interaction
