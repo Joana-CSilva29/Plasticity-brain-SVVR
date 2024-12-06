@@ -1,23 +1,29 @@
 import pandas as pd
 import os
-import matplotlib.pyplot as plt
-from collections import defaultdict
+from tqdm import tqdm  
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 
 def read_csv_safely(file_path):
     """
-    Safely reads a CSV file and skips problematic lines.
+    Reads a CSV file with predefined column names and adds a global step column.
     """
+    column_names = [
+        "step", "fired", "fired_fraction", "activity", "dampening", 
+        "current_calcium", "target_calcium", "synaptic_input", 
+        "background_input", "grown_axons", "connected_axons", 
+        "grown_dendrites", "connected_dendrites"
+    ]
+    
     try:
-        column_names = [
-            "step", "fired", "fired_fraction", "activity", "dampening",
-            "current_calcium", "target_calcium", "synaptic_input", 
-            "background_input", "grown_axons", "connected_axons", 
-            "grown_dendrites", "connected_dendrites"
-        ]
-        df = pd.read_csv(file_path, sep=';', header=None, names=column_names, usecols=range(13), on_bad_lines='skip')
+        df = pd.read_csv(file_path, delimiter=';', header=None, names=column_names, engine='python')
+        df['step'] = df['step'].astype(int)
+        df['global_step'] = df.index  # Add global step as row index
         return df
-    except pd.errors.ParserError as e:
-        print(f"Error reading {file_path}: {e}")
+    except Exception as e:
+        print(f"Error reading file {file_path}: {e}")
         return None
 
 def parse_positions_file(positions_file):
@@ -35,14 +41,14 @@ def parse_positions_file(positions_file):
             neuron_area_map[neuron_id] = area
     return neuron_area_map
 
-def extract_calcium_per_area(data_dir, target_step, neuron_area_map):
+def extract_neuron_properties(data_dir, target_step, neuron_area_map):
     """
-    Extracts calcium values for each neuron and maps them to their areas.
+    Extracts calcium, growth, and connectivity properties for each neuron, with a progress bar.
     """
-    calcium_data = defaultdict(list)
-    area_data = defaultdict(list)
+    records = []
 
-    for neuron_id, area in neuron_area_map.items():
+    # Use tqdm to create a progress bar for the loop
+    for neuron_id, area in tqdm(neuron_area_map.items(), desc="Processing Neurons", unit="neuron"):
         file_path = os.path.join(data_dir, f"0_{neuron_id}.csv")
         
         if not os.path.exists(file_path):
@@ -51,57 +57,222 @@ def extract_calcium_per_area(data_dir, target_step, neuron_area_map):
 
         df = read_csv_safely(file_path)
         if df is None:
-            print(f"Skipping file: {file_path}")
             continue
 
-        # Filter data for the chosen time step
-        step_data = df[df['step'] == target_step]
+        # Convert columns to numeric to handle potential type issues
+        numeric_columns = ['grown_axons', 'connected_axons', 'grown_dendrites', 'connected_dendrites']
+        for col in numeric_columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Filter for the target step
+        step_data = df[df['global_step'] == target_step]
         if not step_data.empty:
-            calcium_value = step_data.iloc[0]['current_calcium']
-            calcium_data[area].append(calcium_value)
-            area_data[area].append(neuron_id)
+            row = step_data.iloc[0]
+            records.append({
+                'Area': int(area.split('_')[1]),
+                'Neuron_ID': neuron_id,
+                'Step': target_step,
+                'Calcium': row['current_calcium'],
+                'Firing Rate': row['fired_fraction'],
+                'Grown Axons': row['grown_axons'],
+                'Connected Axons': row['connected_axons'],
+                'Grown Dendrites': row['grown_dendrites'],
+                'Connected Dendrites': row['connected_dendrites'],
+                'Total Growth': row['grown_axons'] + row['grown_dendrites'],
+                'Total Connections': row['connected_axons'] + row['connected_dendrites']
+            })
 
-    return area_data, calcium_data
+    # Create DataFrame
+    return pd.DataFrame(records)
 
-def plot_boxplot(area_data, calcium_data, target_step, output_dir="plots"):
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
     """
-    Plots a boxplot for calcium values by area and saves it with the target step in the filename.
+    Combines a box plot for Calcium levels by Area and a parallel coordinates plot for averages per Area
+    with normalized column scales and interactive filtering using buttons.
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    areas = sorted(calcium_data.keys())
-    data = [calcium_data[area] for area in areas]
+    # Ensure 'Area' is treated as a string for consistent grouping
+    neuron_df['Area'] = neuron_df['Area'].apply(str)
 
-    plt.figure(figsize=(15, 6))
-    plt.boxplot(data, 
-            positions=range(len(areas)), 
-            patch_artist=True, 
-            showmeans=True,  # Show mean line
-            flierprops=dict(marker='^', color='green', markersize=10),  # Customize outliers
-            meanprops=dict(color='black', linewidth=2)) 
-    area_numbers = [int(area.split('_')[1]) for area in areas]
-    plt.xticks(range(len(areas)), area_numbers, rotation=0)
-    plt.xlabel("Area ID")
-    plt.ylabel("Calcium")
-    plt.title(f"Calcium per Area (Step {target_step})")
+    # Sort neuron_df by Area
+    neuron_df = neuron_df.sort_values(by='Area', key=lambda col: col.astype(int))
 
-    # Save the plot
-    output_file = os.path.join(output_dir, f"calcium_boxplot_step_{target_step}.png")
-    plt.savefig(output_file, dpi=300)
-    print(f"Plot saved to {output_file}")
-    plt.show()
+    # Select only numeric columns for averaging
+    numeric_columns = ['Calcium', 'Firing Rate', 'Grown Axons', 'Grown Dendrites']
+    avg_df = neuron_df.groupby('Area', as_index=False)[numeric_columns].mean()
+
+    # Create the box plot
+    box_trace = go.Box(
+        x=neuron_df['Area'],
+        y=neuron_df['Calcium'],
+        name="Calcium Levels",
+        boxmean=True,
+        marker=dict(color="lightblue")
+    )
+
+    # Create the parallel coordinates plot
+    parcoords_trace = go.Parcoords(
+        line=dict(color=avg_df['Calcium'], colorscale='Viridis'),
+        dimensions=[
+            dict(
+                label="Area ID",
+                values=avg_df['Area'].astype(int),
+                range=[avg_df['Area'].astype(int).min(), avg_df['Area'].astype(int).max()]
+            ),
+            dict(
+                label="Calcium",
+                values=avg_df['Calcium'],
+                range=[0, avg_df['Calcium'].max()]  # Scale between 0 and max
+            ),
+            dict(
+                label="Firing Rate",
+                values=avg_df['Firing Rate'],
+                range=[0, avg_df['Firing Rate'].max()]  # Scale between 0 and max
+            ),
+            dict(
+                label="Grown Axons",
+                values=avg_df['Grown Axons'],
+                range=[0, avg_df['Grown Axons'].max()]  # Scale between 0 and max
+            ),
+            dict(
+                label="Grown Dendrites",
+                values=avg_df['Grown Dendrites'],
+                range=[0, avg_df['Grown Dendrites'].max()]  # Scale between 0 and max
+            ),
+        ]
+    )
+
+    # Combine the two plots
+    combined_fig = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=[
+            f"Neuron Properties (Time step: {target_step})",
+            f"Calcium Levels by Area (Time step: {target_step})"
+        ],
+        vertical_spacing=0.25,  # Add more space between plots
+        specs=[[{"type": "domain"}], [{"type": "xy"}]]
+    )
+
+    # Add parallel coordinates plot to the first row
+    combined_fig.add_trace(parcoords_trace, row=1, col=1)
+
+    # Add box plot to the second row
+    combined_fig.add_trace(box_trace, row=2, col=1)
+
+    # Add x-axis and y-axis labels for the box plot
+    combined_fig.update_xaxes(
+        title_text="Area ID",
+        row=2,
+        col=1,
+        title_font=dict(size=14),
+        tickfont=dict(size=12)
+    )
+    combined_fig.update_yaxes(
+        title_text="Calcium",
+        row=2,
+        col=1,
+        title_font=dict(size=14),
+        tickfont=dict(size=12)
+    )
+
+    # Add interactive buttons for filtering
+    area_options = avg_df['Area'].astype(int).tolist()
+    buttons = []
+
+    for area in area_options:
+        buttons.append(
+            dict(
+                label=f"Area {area}",
+                method="restyle",
+                args=[
+                    {
+                        "dimensions[0].constraintrange": [[area - 0.5, area + 0.5]],  # Filter for this area
+                        "line.color": avg_df.loc[avg_df['Area'] == str(area), 'Calcium']
+                    }
+                ]
+            )
+        )
+
+    # Add reset button
+    buttons.append(
+        dict(
+            label="All Areas",
+            method="restyle",
+            args=[
+                {
+                    "dimensions[0].constraintrange": None  # Reset to show all areas
+                }
+            ]
+        )
+    )
+
+    # Update layout with bold and centered titles
+    combined_fig.update_layout(
+        updatemenus=[
+            dict(
+                buttons=buttons,
+                direction="down",
+                showactive=True,
+                x=0.85,  # Place between the last two columns
+                xanchor="center",
+                y=1.2,  # Adjust position within the parallel plot
+                yanchor="top",
+                bgcolor="rgba(255, 255, 255, 1)",  # Opaque white background
+                bordercolor="black",
+                borderwidth=1
+            )
+        ],
+        annotations=[
+            dict(
+                text=f"<b>Neuron Properties (Time step: {target_step})</b>",  # Bold title
+                x=0.5,  # Center the title
+                y=1.15,  # Position higher to avoid overlap
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                font=dict(size=18, family="Arial", color="black")  # Bold style
+            ),
+            dict(
+                text=f"<b>Calcium Levels by Area (Time step: {target_step})</b>",  # Bold title
+                x=0.5,  # Center the title
+                y=0.45,  # Position higher to avoid overlap
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                font=dict(size=18, family="Arial", color="black")  # Bold style
+            )
+        ],
+        font=dict(size=14),  # Set font size globally
+        height=1000,  # Adjust height for better spacing
+        margin=dict(t=200, b=50, l=50, r=50),  # Add margin for better layout
+        showlegend=False  # Hide the legend if unnecessary
+    )
+
+
+    # Save the plot as an HTML file
+    output_file = os.path.join(output_dir, f"combined_box_and_parallel_step_{target_step}.html")
+    combined_fig.write_html(output_file)
+    print(f"Interactive Combined Plot saved to {output_file}")
+
+    # Show the plot
+    combined_fig.show()
+
 
 # Main execution
-data_dir = "/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/monitors"
-positions_file = "/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/positions/rank_0_positions.txt"
-target_step = 100  # Change to your desired time step
+data_dir = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/monitors'
+positions_file = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/positions/rank_0_positions.txt'
+target_step = 1000  # Change to your desired global step
 
 # Parse positions file to create neuron-to-area mapping
 neuron_area_map = parse_positions_file(positions_file)
 
-# Extract calcium data
-area_data, calcium_data = extract_calcium_per_area(data_dir, target_step, neuron_area_map)
+# Extract neuron properties as a DataFrame
+neuron_df = extract_neuron_properties(data_dir, target_step, neuron_area_map)
 
-# Plot and save boxplot
-plot_boxplot(area_data, calcium_data, target_step)
+plot_combined_parallel_and_box(neuron_df, target_step)
+
