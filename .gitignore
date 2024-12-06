@@ -2,3 +2,4 @@
 /venv
 /visualisation_app/backend/node_modules
 /visualisation_app/frontend/node_modules
+/visualisation_app/backend/uploads

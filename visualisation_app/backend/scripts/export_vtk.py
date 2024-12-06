@@ -229,40 +229,50 @@ def export_to_vtp(polydata, filename):
 
 def main():
     # File paths
-    base_path = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network'  # Update this path
-    initial_timestep = 600000
+    base_path = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network'
+    
+    # Create output directories if they don't exist
+    base_output_dir = 'backend/uploads'
+    sim1_dir = os.path.join(base_output_dir, 'sim1')
+    os.makedirs(sim1_dir, exist_ok=True)
+
+    # Read positions data (constant across timesteps)
     positions_file = f'{base_path}/positions/rank_0_positions.txt'
-    in_network_file = f'{base_path}/network/rank_0_step_{initial_timestep}_in_network.txt'
-    out_network_file = f'{base_path}/network/rank_0_step_{initial_timestep}_out_network.txt'
-
-    # Create output directory if it doesn't exist
-    output_dir = 'backend/uploads'
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Read positions and network data
     points, areas, point_areas, area_to_id = read_positions(positions_file)
     if points is None:
         print("Unable to load positions data. Exiting.")
         return
 
-    in_connections = read_network_connections(in_network_file)
-    out_connections = read_network_connections(out_network_file)
-    if in_connections is None or out_connections is None:
-        print("Unable to load network connections. Exiting.")
-        return
-
-    # Calculate area centroids
+    # Calculate area centroids (constant across timesteps)
     area_centroids = calculate_area_centroids(points, point_areas)
 
-    # Create and export neurons VTP
+    # Create neurons VTP (constant across timesteps)
     neurons_polydata = create_neurons_polydata(points, point_areas, area_to_id, len(areas))
-    export_to_vtp(neurons_polydata, os.path.join(output_dir, 'neurons.vtp'))
+    export_to_vtp(neurons_polydata, os.path.join(sim1_dir, 'neurons.vtp'))
 
-    # Create and export connections VTP
-    connections_polydata = create_connections_polydata(area_centroids, in_connections, out_connections, point_areas)
-    export_to_vtp(connections_polydata, os.path.join(output_dir, 'connections.vtp'))
+    # Process each timestep
+    for timestep in range(0, 1000001, 10000):
+        print(f"Processing timestep {timestep}...")
+        
+        # Read network connections for this timestep
+        in_network_file = f'{base_path}/network/rank_0_step_{timestep}_in_network.txt'
+        out_network_file = f'{base_path}/network/rank_0_step_{timestep}_out_network.txt'
+        
+        in_connections = read_network_connections(in_network_file)
+        out_connections = read_network_connections(out_network_file)
+        
+        if in_connections is None or out_connections is None:
+            print(f"Skipping timestep {timestep} due to missing network data.")
+            continue
 
-    print(f"VTP files exported successfully and save to: {output_dir}")
+        # Create and export connections VTP for this timestep
+        connections_polydata = create_connections_polydata(
+            area_centroids, in_connections, out_connections, point_areas
+        )
+        connections_filename = os.path.join(sim1_dir, f'connections_{timestep:07d}.vtp')
+        export_to_vtp(connections_polydata, connections_filename)
+
+    print(f"VTP files exported successfully to: {sim1_dir}")
 
 
 if __name__ == "__main__":

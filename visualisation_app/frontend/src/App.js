@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   AppBar, 
   Toolbar, 
@@ -29,7 +29,7 @@ import PauseIcon from '@mui/icons-material/Pause';
 import { motion } from 'framer-motion';
 import vtkColorMaps from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction/ColorMaps';
 import VTKControls from './components/VTKControls';
-import { VTKProvider } from './context/VTKContext';
+import { VTKProvider, useVTKState, useVTKDispatch } from './context/VTKContext';
 
 const Input = styled('input')({
   display: 'none',
@@ -187,167 +187,140 @@ const TimelineContainer = styled(Box)(({ theme }) => ({
 }));
 
 function App() {
-  const [selectedSimulation, setSelectedSimulation] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [timelineValue, setTimelineValue] = useState(0);
-  
-  const [dataSources, setDataSources] = useState([
-    {
-      type: 'Neurons',
-      fileUrl: 'http://localhost:5000/files/neurons.vtp',
-      options: {
-        representation: '1:0:0',
-        opacity: 1.0,
-        pointSize: 3,
-        lineWidth: 1
-      }
-    },
-    {
-      type: 'Connections',
-      fileUrl: 'http://localhost:5000/files/connections.vtp',
-      options: {
-        representation: '1:2:0',
-        opacity: 0.7,
-        lineWidth: 2,
-        inColor: [46/255, 204/255, 113/255],  // Green
-        outColor: [230/255, 126/255, 34/255]   // Orange
-      }
-    }
-  ]);
+  const vtkState = useVTKState();
+  const vtkDispatch = useVTKDispatch();
 
-  const updateDataSource = (index, newSource) => {
-    const newSources = [...dataSources];
-    newSources[index] = newSource;
-    setDataSources(newSources);
-  };
+  const handleTimelineChange = useCallback((_, value) => {
+    vtkDispatch({ type: 'SET_TIMESTEP', payload: value });
+  }, [vtkDispatch]);
 
-  const handleSimulationSelect = (simulationId) => {
-    setSelectedSimulation(simulationId);
-    // Here you could load different VTP files based on the selected simulation
-  };
+  const handlePlayPause = useCallback(() => {
+    vtkDispatch({ type: 'SET_PLAYING', payload: !vtkState.isPlaying });
+  }, [vtkDispatch, vtkState.isPlaying]);
+
+  const handleSimulationSelect = useCallback((simulationId) => {
+    vtkDispatch({ type: 'SET_SIMULATION', payload: simulationId });
+  }, [vtkDispatch]);
 
   return (
     <ThemeProvider theme={theme}>
-      <VTKProvider>
-        <MainContainer>
-          <StyledAppBar position="fixed">
-            <StyledToolbar>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Typography 
-                  variant="h5" 
-                  sx={{ 
-                    fontWeight: 600,
-                    background: 'linear-gradient(90deg, #fff, #81ECEC)',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                  }}
+      <MainContainer>
+        <StyledAppBar position="fixed">
+          <StyledToolbar>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Typography 
+                variant="h5" 
+                sx={{ 
+                  fontWeight: 600,
+                  background: 'linear-gradient(90deg, #fff, #81ECEC)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                }}
+              >
+                VTP Viewer
+              </Typography>
+            </Box>
+          </StyledToolbar>
+        </StyledAppBar>
+
+        <ContentContainer>
+          <GlassContainer
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <Stack spacing={3}>
+              <ViewerLayout>
+                <ControlPanel
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.5, delay: 0.2 }}
                 >
-                  VTP Viewer
-                </Typography>
-              </Box>
-            </StyledToolbar>
-          </StyledAppBar>
+                  <Typography variant="h6" sx={{ color: 'white', mb: 2 }}>
+                    Visualization Controls
+                  </Typography>
 
-          <ContentContainer>
-            <GlassContainer
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-            >
-              <Stack spacing={3}>
-                <ViewerLayout>
-                  <ControlPanel
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.5, delay: 0.2 }}
-                  >
-                    <Typography variant="h6" sx={{ color: 'white', mb: 2 }}>
-                      Visualization Controls
-                    </Typography>
+                  <VTKControls />
+                </ControlPanel>
 
-                    <VTKControls
-                      dataSources={dataSources}
-                      updateDataSource={updateDataSource}
-                      colorMaps={COLORMAPS}
-                    />
-                  </ControlPanel>
+                <Box className="viewer-section">
+                  <ViewerContainer>
+                    <VTPViewer />
+                  </ViewerContainer>
 
-                  <Box className="viewer-section">
-                    <ViewerContainer>
-                      <VTPViewer dataSources={dataSources} />
-                    </ViewerContainer>
-
-                    <TimelineContainer>
-                      <PlayButton onClick={() => setIsPlaying(!isPlaying)}>
-                        {isPlaying ? <PauseIcon /> : <PlayArrowIcon />}
-                      </PlayButton>
-                      <Slider
-                        value={timelineValue}
-                        onChange={(_, value) => setTimelineValue(value)}
-                        sx={{
-                          '& .MuiSlider-thumb': {
-                            backgroundColor: '#fff',
-                          },
-                          '& .MuiSlider-track': {
-                            background: theme.palette.gradients.blue,
-                          },
-                        }}
-                      />
-                    </TimelineContainer>
-
-                    <Stack 
-                      direction="row" 
-                      spacing={2} 
-                      sx={{ 
-                        flexWrap: 'wrap', 
-                        gap: 2,
-                        mt: 2,
+                  <TimelineContainer>
+                    <PlayButton onClick={handlePlayPause}>
+                      {vtkState.isPlaying ? <PauseIcon /> : <PlayArrowIcon />}
+                    </PlayButton>
+                    <Slider
+                      value={vtkState.currentTimestep}
+                      onChange={handleTimelineChange}
+                      min={0}
+                      max={vtkState.maxTimestep}
+                      step={vtkState.stepSize}
+                      sx={{
+                        '& .MuiSlider-thumb': {
+                          backgroundColor: '#fff',
+                        },
+                        '& .MuiSlider-track': {
+                          background: theme.palette.gradients.blue,
+                        },
                       }}
+                    />
+                  </TimelineContainer>
+
+                  <Stack 
+                    direction="row" 
+                    spacing={2} 
+                    sx={{ 
+                      flexWrap: 'wrap', 
+                      gap: 2,
+                      mt: 2,
+                    }}
+                  >
+                    <FileButton
+                      component={motion.button}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      isSelected={vtkState.currentSimulation === 'sim1'}
+                      onClick={() => handleSimulationSelect('sim1')}
                     >
-                      <FileButton
-                        component={motion.button}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        isSelected={selectedSimulation === 'sim1'}
-                        onClick={() => handleSimulationSelect('sim1')}
-                      >
-                        Simulation 1
-                      </FileButton>
-                      <FileButton
-                        component={motion.button}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        isSelected={selectedSimulation === 'sim2'}
-                        onClick={() => handleSimulationSelect('sim2')}
-                      >
-                        Simulation 2
-                      </FileButton>
-                      <FileButton
-                        component={motion.button}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        isSelected={selectedSimulation === 'sim3'}
-                        onClick={() => handleSimulationSelect('sim3')}
-                      >
-                        Simulation 3
-                      </FileButton>
-                      <FileButton
-                        component={motion.button}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        isSelected={selectedSimulation === 'sim4'}
-                        onClick={() => handleSimulationSelect('sim4')}
-                      >
-                        Simulation 4
-                      </FileButton>
-                    </Stack>
-                  </Box>
-                </ViewerLayout>
-              </Stack>
-            </GlassContainer>
-          </ContentContainer>
-        </MainContainer>
-      </VTKProvider>
+                      Simulation 1
+                    </FileButton>
+                    <FileButton
+                      component={motion.button}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      isSelected={vtkState.currentSimulation === 'sim2'}
+                      onClick={() => handleSimulationSelect('sim2')}
+                    >
+                      Simulation 2
+                    </FileButton>
+                    <FileButton
+                      component={motion.button}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      isSelected={vtkState.currentSimulation === 'sim3'}
+                      onClick={() => handleSimulationSelect('sim3')}
+                    >
+                      Simulation 3
+                    </FileButton>
+                    <FileButton
+                      component={motion.button}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      isSelected={vtkState.currentSimulation === 'sim4'}
+                      onClick={() => handleSimulationSelect('sim4')}
+                    >
+                      Simulation 4
+                    </FileButton>
+                  </Stack>
+                </Box>
+              </ViewerLayout>
+            </Stack>
+          </GlassContainer>
+        </ContentContainer>
+      </MainContainer>
     </ThemeProvider>
   );
 }

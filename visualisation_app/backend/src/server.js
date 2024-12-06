@@ -53,7 +53,11 @@ app.get('/api/files', (req, res) => {
 });
 
 // Serve VTP files
-app.use('/files', express.static('uploads'));
+app.use('/files', express.static('uploads', {
+  maxAge: '1h',
+  etag: true,
+  lastModified: true
+}));
 
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);

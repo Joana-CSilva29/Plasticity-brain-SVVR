@@ -9,8 +9,10 @@ import vtkColorMaps from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction/C
 import { ColorMode, ScalarMode } from '@kitware/vtk.js/Rendering/Core/Mapper/Constants';
 import { styled } from '@mui/material/styles';
 import { Box } from '@mui/material';
-import { useVTKState } from '../context/VTKContext';
+import { useVTKState, useVTKDispatch } from '../context/VTKContext';
 import vtkTubeFilter from '@kitware/vtk.js/Filters/General/TubeFilter';
+import { useVTPLoader } from '../hooks/useVTPLoader';
+import { useVTKAnimation } from '../hooks/useVTKAnimation';
 
 const ViewerContainer = styled(Box)({
   width: '100%',
@@ -23,8 +25,10 @@ const ViewerContainer = styled(Box)({
 
 const VTPViewer = () => {
   const state = useVTKState();
+  const dispatch = useVTKDispatch();
   const vtkContainerRef = useRef(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const animationRef = useRef(null);
   const context = useRef({
     fullScreenRenderWindow: null,
     actors: new Map(),
@@ -35,6 +39,8 @@ const VTPViewer = () => {
       radii: null
     }
   });
+  const { loadVTPData, preloadNextTimestep } = useVTPLoader();
+  useVTKAnimation();
 
   // Initialize VTK viewer
   useEffect(() => {
@@ -124,7 +130,7 @@ const VTPViewer = () => {
     };
 
     loadData();
-  }, [isInitialized]);
+  }, [isInitialized, state.neurons.fileUrl, state.connections.fileUrl]);
 
   // Update properties when state changes
   useEffect(() => {
@@ -142,6 +148,13 @@ const VTPViewer = () => {
 
     context.current.renderWindow?.render();
   }, [state, isInitialized]);
+
+  // Add effect for preloading
+  useEffect(() => {
+    if (state.isPlaying) {
+      preloadNextTimestep();
+    }
+  }, [state.currentTimestep, state.isPlaying, preloadNextTimestep]);
 
   const updateActorProperties = (actor, source) => {
     if (!actor) return;
