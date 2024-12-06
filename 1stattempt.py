@@ -188,11 +188,12 @@ def main():
     global base_path, renderer, render_window, area_to_id
 
     # File paths and timestep configuration
-    base_path = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network'
+    base_path_joana = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network'
+    base_path_sandor = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network'
     initial_timestep = 600000
-    positions_file = f'{base_path}/positions/rank_0_positions.txt'
-    in_network_file = f'{base_path}/network/rank_0_step_{initial_timestep}_in_network.txt'
-    out_network_file = f'{base_path}/network/rank_0_step_{initial_timestep}_out_network.txt'
+    positions_file = f'{base_path_sandor}/positions/rank_0_positions.txt'
+    in_network_file = f'{base_path_sandor}/network/rank_0_step_{initial_timestep}_in_network.txt'
+    out_network_file = f'{base_path_sandor}/network/rank_0_step_{initial_timestep}_out_network.txt'
 
     points, areas, point_areas, area_to_id = read_positions(positions_file)
     if points is None:
