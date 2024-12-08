@@ -8,21 +8,17 @@ const initialState = {
     type: 'Neurons',
     fileUrl: 'http://localhost:5000/files/sim1/neurons.vtp',
     options: {
-      representation: '1:0:0',
       opacity: 1.0,
-      pointSize: 3,
-      lineWidth: 1
+      pointSize: 3
     }
   },
   connections: {
     type: 'Connections',
     fileUrl: 'http://localhost:5000/files/sim1/connections_0000000.vtp',
     options: {
-      representation: '1:2:0',
       opacity: 0.7,
-      lineWidth: 1,
-      inColor: [46/255, 204/255, 113/255],
-      outColor: [230/255, 126/255, 34/255]
+      inColor: [46/255, 204/255, 113/255],  // Green
+      outColor: [230/255, 126/255, 34/255]  // Orange
     }
   },
   selectedObject: 'neurons',

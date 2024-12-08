@@ -1,0 +1,14 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "chrome",
+            "request": "launch",
+            "name": "Open combined_box_and_parallel_step_1000.html",
+            "file": "/Users/sandor/dev/Computational Science/scientific-visualisation-and-virtual-reality/Plasticity-brain-SVVR/plots/combined_box_and_parallel_step_1000.html"
+        }
+    ]
+}

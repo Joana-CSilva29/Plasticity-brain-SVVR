@@ -39,7 +39,7 @@ const VTPViewer = () => {
       radii: null
     }
   });
-  const { loadVTPData, preloadNextTimestep } = useVTPLoader();
+  const { loadVTPData, preloadNextTimesteps } = useVTPLoader();
   useVTKAnimation();
 
   // Initialize VTK viewer
@@ -94,20 +94,19 @@ const VTPViewer = () => {
         connectionsReader.parseAsArrayBuffer(connectionsBuffer);
         const connectionsData = connectionsReader.getOutputData(0);
 
-        // Store original colors and radii
-        const colors = connectionsData.getCellData().getArrayByName('Colors');
-        const radii = connectionsData.getCellData().getArrayByName('TubeRadius');
-        if (colors && radii) {
-          context.current.originalData = {
-            colors: new Uint8Array(colors.getData()),
-            radii: new Float32Array(radii.getData())
-          };
-        }
-
+        // Set up the connections visualization
         const connectionsMapper = vtkMapper.newInstance();
         const connectionsActor = vtkActor.newInstance();
         connectionsActor.setMapper(connectionsMapper);
         connectionsMapper.setInputData(connectionsData);
+
+        // Verify the connection types are present
+        const connectionTypes = connectionsData.getCellData().getArrayByName('ConnectionType');
+        if (!connectionTypes) {
+          console.error('ConnectionType array not found in VTP file');
+        } else {
+          console.log('ConnectionType array found:', connectionTypes.getData());
+        }
 
         // Store actors
         context.current.actors.set('neurons', neuronsActor);
@@ -151,10 +150,10 @@ const VTPViewer = () => {
 
   // Add effect for preloading
   useEffect(() => {
-    if (state.isPlaying) {
-      preloadNextTimestep();
+    if (isInitialized && state.isPlaying) {
+      preloadNextTimesteps();
     }
-  }, [state.currentTimestep, state.isPlaying, preloadNextTimestep]);
+  }, [isInitialized, state.isPlaying, preloadNextTimesteps]);
 
   const updateActorProperties = (actor, source) => {
     if (!actor) return;
@@ -163,57 +162,46 @@ const VTPViewer = () => {
     const mapper = actor.getMapper();
 
     if (source.type === 'Neurons') {
-      // Handle neuron properties
+      // For neurons
       mapper.setScalarVisibility(true);
       mapper.setScalarModeToUsePointData();
       property.setPointSize(source.options.pointSize);
       property.setOpacity(source.options.opacity);
-
-      const [mode, rep] = source.options.representation.split(':').map(Number);
-      property.setRepresentation(rep);
-    } else if (source.type === 'Connections') {
-      // Handle connection properties
-      mapper.setScalarVisibility(true);
-      mapper.setScalarModeToUseCellData();
-      property.setOpacity(source.options.opacity);
-
-      const polydata = actor.getMapper().getInputData();
+      property.setRepresentation(0); // Points
       
-      // Update colors using original data
-      const colors = polydata.getCellData().getArrayByName('Colors');
-      if (colors && context.current.originalData.colors) {
-        const numCells = polydata.getNumberOfCells();
-        const newColors = new Uint8Array(numCells * 3);
-        
-        for (let i = 0; i < numCells; i++) {
-          const isInConnection = context.current.originalData.colors[i * 3] === 46;
-          const color = isInConnection ? source.options.inColor : source.options.outColor;
-          
-          newColors[i * 3] = Math.round(color[0] * 255);
-          newColors[i * 3 + 1] = Math.round(color[1] * 255);
-          newColors[i * 3 + 2] = Math.round(color[2] * 255);
-        }
-        
-        colors.setData(newColors);
-        colors.modified();
+      // Force opacity update
+      property.modified();
+      
+    } else if (source.type === 'Connections') {
+      // For connections
+      const polydata = mapper.getInputData();
+      
+      // Create color lookup based on connection type
+      const lut = vtkColorTransferFunction.newInstance();
+      lut.addRGBPoint(0, ...source.options.inColor);   // In connections
+      lut.addRGBPoint(1, ...source.options.outColor);  // Out connections
+      
+      // Clean up old lookup table
+      if (mapper.getLookupTable()) {
+        mapper.getLookupTable().delete();
       }
-
-      // Update line width using original radii
-      const radii = polydata.getCellData().getArrayByName('TubeRadius');
-      if (radii && context.current.originalData.radii) {
-        const scaledRadii = new Float32Array(context.current.originalData.radii.length);
-        for (let i = 0; i < context.current.originalData.radii.length; i++) {
-          scaledRadii[i] = context.current.originalData.radii[i] * source.options.lineWidth;
-        }
-        radii.setData(scaledRadii);
-        radii.modified();
-      }
-
-      polydata.modified();
-      mapper.modified();
+      
+      // Set up the mapper
+      mapper.setLookupTable(lut);
+      mapper.setScalarRange(0, 1);
+      mapper.setColorModeToMapScalars();
+      mapper.setScalarModeToUseCellData();
+      mapper.setScalarVisibility(true);
+      
+      // Set opacity
+      property.setOpacity(source.options.opacity);
+      property.modified();
     }
 
-    // Force a render
+    // Make sure everything is updated
+    mapper.modified();
+    actor.modified();
+    
     if (context.current.renderWindow) {
       context.current.renderWindow.render();
     }

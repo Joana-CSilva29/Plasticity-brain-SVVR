@@ -1,29 +1,8 @@
 import React from 'react';
-import { Box, Select, MenuItem, Slider, FormControl, InputLabel, Typography, Tabs, Tab } from '@mui/material';
+import { Box, Slider, Typography, Tabs, Tab } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { useVTKState } from '../context/VTKContext';
 import { useVTKActions } from '../hooks/useVTKActions';
-
-const StyledFormControl = styled(FormControl)(({ theme }) => ({
-  '& .MuiInputLabel-root': {
-    color: 'rgba(255, 255, 255, 0.7)',
-  },
-  '& .MuiOutlinedInput-root': {
-    color: 'white',
-    '& fieldset': {
-      borderColor: 'rgba(255, 255, 255, 0.2)',
-    },
-    '&:hover fieldset': {
-      borderColor: 'rgba(255, 255, 255, 0.3)',
-    },
-    '&.Mui-focused fieldset': {
-      borderColor: theme.palette.primary.main,
-    },
-  },
-  '& .MuiSelect-icon': {
-    color: 'rgba(255, 255, 255, 0.7)',
-  },
-}));
 
 const SliderContainer = styled(Box)(({ theme }) => ({
   '& .MuiSlider-root': {
@@ -35,7 +14,22 @@ const SliderContainer = styled(Box)(({ theme }) => ({
   },
 }));
 
-const VTKControls = ({ colorMaps }) => {
+const ColorControl = styled(Box)(({ theme }) => ({
+  '& .MuiTypography-root': {
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginBottom: theme.spacing(1),
+  },
+  '& input[type="color"]': {
+    width: '100%',
+    height: '40px',
+    borderRadius: theme.shape.borderRadius,
+    border: '1px solid rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'transparent',
+    cursor: 'pointer',
+  },
+}));
+
+const VTKControls = () => {
   const state = useVTKState();
   const { updateNeuronOptions, updateConnectionOptions, setSelectedObject } = useVTKActions();
 
@@ -44,7 +38,6 @@ const VTKControls = ({ colorMaps }) => {
   };
 
   const currentSource = state[state.selectedObject];
-  const isConnections = state.selectedObject === 'connections';
 
   const handleUpdate = (property, value) => {
     if (state.selectedObject === 'neurons') {
@@ -81,71 +74,59 @@ const VTKControls = ({ colorMaps }) => {
         <Tab label="Connections" value="connections" />
       </Tabs>
 
-      {!isConnections && (
-        <StyledFormControl fullWidth>
-          <InputLabel>Representation</InputLabel>
-          <Select
-            value={currentSource.options.representation}
-            onChange={(e) => handleUpdate('representation', e.target.value)}
-            label="Representation"
-          >
-            <MenuItem value="1:0:0">Points</MenuItem>
-            <MenuItem value="1:1:0">Wireframe</MenuItem>
-            <MenuItem value="1:2:0">Surface</MenuItem>
-          </Select>
-        </StyledFormControl>
-      )}
-
-      <SliderContainer>
-        <Typography>Opacity</Typography>
-        <Slider
-          value={currentSource.options.opacity}
-          onChange={(_, value) => handleUpdate('opacity', value)}
-          min={0}
-          max={1}
-          step={0.1}
-          valueLabelDisplay="auto"
-        />
-      </SliderContainer>
-
-      <SliderContainer>
-        <Typography>{isConnections ? 'Line Width' : 'Point Size'}</Typography>
-        <Slider
-          value={isConnections ? currentSource.options.lineWidth : currentSource.options.pointSize}
-          onChange={(_, value) => handleUpdate(isConnections ? 'lineWidth' : 'pointSize', value)}
-          min={1}
-          max={isConnections ? 10 : 20}
-          step={1}
-          valueLabelDisplay="auto"
-        />
-      </SliderContainer>
-
-      {isConnections && (
+      {state.selectedObject === 'neurons' ? (
         <>
-          <Box>
-            <Typography>In-Connection Color</Typography>
+          <SliderContainer>
+            <Typography>Point Size</Typography>
+            <Slider
+              value={currentSource.options.pointSize}
+              onChange={(_, value) => handleUpdate('pointSize', value)}
+              min={1}
+              max={10}
+              valueLabelDisplay="auto"
+            />
+          </SliderContainer>
+          <SliderContainer>
+            <Typography>Opacity</Typography>
+            <Slider
+              value={currentSource.options.opacity}
+              onChange={(_, value) => handleUpdate('opacity', value)}
+              min={0}
+              max={1}
+              step={0.1}
+              valueLabelDisplay="auto"
+            />
+          </SliderContainer>
+        </>
+      ) : (
+        <>
+          <SliderContainer>
+            <Typography>Opacity</Typography>
+            <Slider
+              value={currentSource.options.opacity}
+              onChange={(_, value) => handleUpdate('opacity', value)}
+              min={0}
+              max={1}
+              step={0.1}
+              valueLabelDisplay="auto"
+            />
+          </SliderContainer>
+          <ColorControl>
+            <Typography>Input Connections Color</Typography>
             <input
               type="color"
               value={rgbToHex(currentSource.options.inColor)}
-              onChange={(e) => {
-                const rgb = hexToRgb(e.target.value);
-                handleUpdate('inColor', rgb);
-              }}
-              style={{ width: '100%', height: '40px' }}
+              onChange={(e) => handleUpdate('inColor', hexToRgb(e.target.value))}
             />
-          </Box>
-          <Box>
-            <Typography>Out-Connection Color</Typography>
+          </ColorControl>
+          <ColorControl>
+            <Typography>Output Connections Color</Typography>
             <input
               type="color"
               value={rgbToHex(currentSource.options.outColor)}
-              onChange={(e) => {
-                const rgb = hexToRgb(e.target.value);
-                handleUpdate('outColor', rgb);
-              }}
-              style={{ width: '100%', height: '40px' }}
+              onChange={(e) => handleUpdate('outColor', hexToRgb(e.target.value))}
             />
-          </Box>
+          </ColorControl>
         </>
       )}
     </Box>

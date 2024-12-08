@@ -107,106 +107,60 @@ def create_neurons_polydata(points, point_areas, area_to_id, num_areas):
 
 
 def create_connections_polydata(area_centroids, in_connections, out_connections, point_areas):
-    """Create vtkPolyData for area-level connections."""
+    """Create vtkPolyData for area-level connections with separate in/out colors."""
     points = vtk.vtkPoints()
     lines = vtk.vtkCellArray()
     
-    # Create arrays for tube properties
-    radii = vtk.vtkFloatArray()
-    radii.SetName("TubeRadius")
-    radii.SetNumberOfComponents(1)
+    # Create array for connection types (0 for in, 1 for out)
+    connectionTypes = vtk.vtkUnsignedCharArray()
+    connectionTypes.SetName("ConnectionType")
+    connectionTypes.SetNumberOfComponents(1)
     
-    # Create array for line colors
-    colors = vtk.vtkUnsignedCharArray()
-    colors.SetName("Colors")
-    colors.SetNumberOfComponents(3)
-
-    # Define colors for in/out connections
-    IN_COLOR = [46, 204, 113]   # Green
-    OUT_COLOR = [230, 126, 34]  # Orange
-
     # Map area IDs to point indices
     area_id_to_point_id = {}
     for area_id, centroid in area_centroids.items():
         area_id_to_point_id[area_id] = points.InsertNextPoint(centroid)
-
-    # Process connections separately for in/out
-    processed_connections = set()
-
-    # Helper function to count valid connections
-    def count_valid_connections(connections, area1, area2):
-        return sum(1 for s, t in connections 
-                  if s < len(point_areas) and t < len(point_areas)  # Add bounds check
-                  and point_areas[s] == area1 and point_areas[t] == area2)
 
     # Process in connections
     for source_id, target_id in in_connections:
         if source_id < len(point_areas) and target_id < len(point_areas):
             area1 = point_areas[source_id]
             area2 = point_areas[target_id]
-            connection_key = (area1, area2)
-            if connection_key not in processed_connections:
-                processed_connections.add(connection_key)
-                
-                # Create line
-                line = vtk.vtkLine()
-                line.GetPointIds().SetId(0, area_id_to_point_id[area1])
-                line.GetPointIds().SetId(1, area_id_to_point_id[area2])
-                lines.InsertNextCell(line)
-                
-                # Calculate radius based on number of connections
-                count = count_valid_connections(in_connections, area1, area2)
-                radius = 0.05 * count  # Adjust scale factor as needed
-                radii.InsertNextValue(radius)
-                
-                # Add in-connection color
-                colors.InsertNextTuple3(*IN_COLOR)
+            
+            # Create line
+            line = vtk.vtkLine()
+            line.GetPointIds().SetId(0, area_id_to_point_id[area1])
+            line.GetPointIds().SetId(1, area_id_to_point_id[area2])
+            lines.InsertNextCell(line)
+            
+            # Mark as in connection (0)
+            connectionTypes.InsertNextValue(0)
 
     # Process out connections
     for source_id, target_id in out_connections:
         if source_id < len(point_areas) and target_id < len(point_areas):
             area1 = point_areas[source_id]
             area2 = point_areas[target_id]
-            connection_key = (area1, area2)
-            if connection_key not in processed_connections:
-                processed_connections.add(connection_key)
-                
-                # Create line
-                line = vtk.vtkLine()
-                line.GetPointIds().SetId(0, area_id_to_point_id[area1])
-                line.GetPointIds().SetId(1, area_id_to_point_id[area2])
-                lines.InsertNextCell(line)
-                
-                # Calculate radius based on number of connections
-                count = count_valid_connections(out_connections, area1, area2)
-                radius = 0.05 * count  # Adjust scale factor as needed
-                radii.InsertNextValue(radius)
-                
-                # Add out-connection color
-                colors.InsertNextTuple3(*OUT_COLOR)
+            
+            # Create line
+            line = vtk.vtkLine()
+            line.GetPointIds().SetId(0, area_id_to_point_id[area1])
+            line.GetPointIds().SetId(1, area_id_to_point_id[area2])
+            lines.InsertNextCell(line)
+            
+            # Mark as out connection (1)
+            connectionTypes.InsertNextValue(1)
 
     # Create the polydata
     polydata = vtk.vtkPolyData()
     polydata.SetPoints(points)
     polydata.SetLines(lines)
     
-    # Add the radius array to cell data
-    polydata.GetCellData().AddArray(radii)
-    polydata.GetCellData().SetActiveScalars("TubeRadius")
-    
-    # Add colors to cell data
-    polydata.GetCellData().AddArray(colors)
+    # Add the connection types to cell data
+    polydata.GetCellData().AddArray(connectionTypes)
+    polydata.GetCellData().SetActiveScalars('ConnectionType')
 
-    # Create tube filter to generate 3D tubes
-    tube_filter = vtk.vtkTubeFilter()
-    tube_filter.SetInputData(polydata)
-    tube_filter.SetVaryRadiusToVaryRadiusByScalar()
-    tube_filter.SetNumberOfSides(20)
-    tube_filter.SetRadiusFactor(1.0)
-    tube_filter.CappingOn()
-    tube_filter.Update()
-
-    return tube_filter.GetOutput()
+    return polydata
 
 
 def export_to_vtp(polydata, filename):
