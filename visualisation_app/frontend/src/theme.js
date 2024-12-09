@@ -1,6 +1,12 @@
 import { createTheme, alpha } from '@mui/material';
 
 export const theme = createTheme({
+  typography: {
+    fontFamily: 'monospace',
+    allVariants: {
+      color: 'rgba(255, 255, 255, 0.7)',
+    },
+  },
   palette: {
     primary: {
       main: '#6C5CE7',
@@ -24,6 +30,28 @@ export const theme = createTheme({
     },
   },
   components: {
+    MuiTypography: {
+      styleOverrides: {
+        root: {
+          fontFamily: 'monospace',
+          color: 'rgba(255, 255, 255, 0.7)',
+        },
+      },
+    },
+    MuiInputBase: {
+      styleOverrides: {
+        root: {
+          fontFamily: 'monospace',
+        },
+      },
+    },
+    MuiMenuItem: {
+      styleOverrides: {
+        root: {
+          fontFamily: 'monospace',
+        },
+      },
+    },
     MuiPaper: {
       styleOverrides: {
         root: {
@@ -43,6 +71,7 @@ export const theme = createTheme({
           fontWeight: 600,
           padding: '12px 24px',
           transition: 'all 0.3s ease',
+          fontFamily: 'monospace',
         },
       },
     },
