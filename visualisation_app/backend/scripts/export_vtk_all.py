@@ -261,7 +261,7 @@ def create_empty_connections_polydata():
 
 
 def main():
-    base_ssd_path = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23'
+    base_ssd_path = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR'
     
     # Define simulation configurations
     simulations = {
