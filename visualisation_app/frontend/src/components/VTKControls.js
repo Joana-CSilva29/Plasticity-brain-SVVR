@@ -29,7 +29,7 @@ const ColorControl = styled(Box)(({ theme }) => ({
   },
 }));
 
-const VTKControls = () => {
+const VTKControls = ({ isLoading }) => {
   const state = useVTKState();
   const { updateNeuronOptions, updateConnectionOptions, setSelectedObject } = useVTKActions();
 
@@ -61,7 +61,13 @@ const VTKControls = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      gap: 3,
+      opacity: isLoading ? 0.5 : 1,
+      pointerEvents: isLoading ? 'none' : 'auto'
+    }}>
       <Tabs
         value={state.selectedObject}
         onChange={handleChange}

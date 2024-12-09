@@ -15,6 +15,7 @@ import VTKControls from './components/VTKControls';
 import SimulationControls from './components/SimulationControls';
 import { useVTKState } from './context/VTKContext';
 import { theme } from './theme';
+import NeuronAnalytics from './components/NeuronAnalytics';
 
 const MainContainer = styled(Box)(({ theme }) => ({
   minHeight: '100vh',
@@ -128,6 +129,7 @@ function App() {
                   <ViewerContainer>
                     <VTPViewer />
                   </ViewerContainer>
+                  <NeuronAnalytics />
                 </Box>
               </ViewerLayout>
             </Stack>

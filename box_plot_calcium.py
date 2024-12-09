@@ -264,9 +264,9 @@ def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
 
 
 # Main execution
-data_dir = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/monitors'
-positions_file = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/positions/rank_0_positions.txt'
-target_step = 1000  # Change to your desired global step
+data_dir = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network/monitors'
+positions_file = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network/positions/rank_0_positions.txt'
+target_step = 1000000  # Change to your desired global step
 
 # Parse positions file to create neuron-to-area mapping
 neuron_area_map = parse_positions_file(positions_file)

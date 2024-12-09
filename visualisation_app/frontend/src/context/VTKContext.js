@@ -25,7 +25,8 @@ const initialState = {
     options: {
       opacity: 0.7,
       inColor: [46/255, 204/255, 113/255],
-      outColor: [230/255, 126/255, 34/255]
+      outColor: [230/255, 126/255, 34/255],
+      tubeRadius: 0.05
     }
   },
   selectedObject: 'neurons',

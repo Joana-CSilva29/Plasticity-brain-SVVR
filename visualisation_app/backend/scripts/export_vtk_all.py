@@ -107,7 +107,7 @@ def create_neurons_polydata(points, point_areas, area_to_id, num_areas):
 
 
 def create_connections_polydata(area_centroids, in_connections, out_connections, point_areas):
-    """Create vtkPolyData for area-level connections with separate in/out colors."""
+    """Create vtkPolyData for area-level connections with tubes and separate in/out colors."""
     points = vtk.vtkPoints()
     lines = vtk.vtkCellArray()
     
@@ -121,6 +121,10 @@ def create_connections_polydata(area_centroids, in_connections, out_connections,
     for area_id, centroid in area_centroids.items():
         area_id_to_point_id[area_id] = points.InsertNextPoint(centroid)
 
+    # Create initial polydata with lines
+    polydata = vtk.vtkPolyData()
+    polydata.SetPoints(points)
+    
     # Process in connections
     for source_id, target_id in in_connections:
         if source_id < len(point_areas) and target_id < len(point_areas):
@@ -151,16 +155,24 @@ def create_connections_polydata(area_centroids, in_connections, out_connections,
             # Mark as out connection (1)
             connectionTypes.InsertNextValue(1)
 
-    # Create the polydata
-    polydata = vtk.vtkPolyData()
-    polydata.SetPoints(points)
     polydata.SetLines(lines)
-    
-    # Add the connection types to cell data
     polydata.GetCellData().AddArray(connectionTypes)
     polydata.GetCellData().SetActiveScalars('ConnectionType')
 
-    return polydata
+    # Create tube filter
+    tubeFilter = vtk.vtkTubeFilter()
+    tubeFilter.SetInputData(polydata)
+    tubeFilter.SetRadius(0.05)  # Match the default radius from frontend
+    tubeFilter.SetNumberOfSides(6)  # Match the optimized sides from frontend
+    tubeFilter.SetCapping(False)  # Match frontend setting
+    tubeFilter.SetVaryRadius(0)  # Constant radius
+    tubeFilter.Update()
+
+    # Get the output and preserve the connection type scalar data
+    output = tubeFilter.GetOutput()
+    output.GetCellData().SetScalars(connectionTypes)
+    
+    return output
 
 
 def export_to_vtp(polydata, filename):

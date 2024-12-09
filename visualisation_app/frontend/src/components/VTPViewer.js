@@ -6,7 +6,7 @@ import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
 import vtkXMLPolyDataReader from '@kitware/vtk.js/IO/XML/XMLPolyDataReader';
 import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction';
 import { styled } from '@mui/material/styles';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, CircularProgress } from '@mui/material';
 import { useVTKState } from '../context/VTKContext';
 
 const ViewerContainer = styled(Box)({
@@ -27,7 +27,9 @@ const VTKContainer = styled(Box)({
   '& > div': {
     width: '100%',
     height: '100%',
-  }
+  },
+  minHeight: '400px',
+  minWidth: '300px',
 });
 
 const InfoOverlay = styled(Box)(({ theme }) => ({
@@ -45,10 +47,28 @@ const StyledTypography = styled(Typography)({
   fontSize: '0.9rem',
 });
 
+const LoadingOverlay = styled(Box)({
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  zIndex: 2,
+  gap: '16px',
+});
+
 const VTPViewer = () => {
   const state = useVTKState();
   const vtkContainerRef = useRef(null);
+  const [containerReady, setContainerReady] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const context = useRef({
     fullScreenRenderWindow: null,
     actors: new Map(),
@@ -108,13 +128,26 @@ const VTPViewer = () => {
     camera.setViewAngle(state.viewAngle);
   }, []);
 
+  // Wait for container to be ready
+  useEffect(() => {
+    if (vtkContainerRef.current) {
+      setContainerReady(true);
+    }
+  }, []);
+
   // Initialize VTK viewer
   useEffect(() => {
-    if (!vtkContainerRef.current || isInitialized) return;
+    if (!containerReady || isInitialized) return;
+
+    const container = vtkContainerRef.current;
+    if (!container) return;
 
     try {
+      // Make sure container has dimensions
+      if (container.getBoundingClientRect().width === 0) return;
+
       context.current.fullScreenRenderWindow = vtkFullScreenRenderWindow.newInstance({
-        rootContainer: vtkContainerRef.current,
+        rootContainer: container,
         background: [0.1, 0.1, 0.1],
       });
 
@@ -129,7 +162,6 @@ const VTPViewer = () => {
     return () => {
       if (context.current.fullScreenRenderWindow) {
         try {
-          saveCameraState();
           cleanupVTKObjects();
           context.current.fullScreenRenderWindow.delete();
           context.current.fullScreenRenderWindow = null;
@@ -141,7 +173,7 @@ const VTPViewer = () => {
         }
       }
     };
-  }, [cleanupVTKObjects, saveCameraState]);
+  }, [containerReady, cleanupVTKObjects]);
 
   // Load data with debouncing
   useEffect(() => {
@@ -151,19 +183,24 @@ const VTPViewer = () => {
 
     const loadData = async () => {
       try {
+        setIsLoading(true);
+        setLoadingProgress(0);
         saveCameraState();
         cleanupVTKObjects();
 
         // Load neurons
+        setLoadingProgress(20);
         const neuronsResponse = await fetch(state.neurons.fileUrl);
         if (isCancelled) return;
         const neuronsBuffer = await neuronsResponse.arrayBuffer();
         if (isCancelled) return;
 
+        setLoadingProgress(40);
         const neuronsReader = vtkXMLPolyDataReader.newInstance();
         context.current.readers.set('neurons', neuronsReader);
         neuronsReader.parseAsArrayBuffer(neuronsBuffer);
 
+        setLoadingProgress(60);
         const neuronsMapper = vtkMapper.newInstance();
         context.current.mappers.set('neurons', neuronsMapper);
         const neuronsActor = vtkActor.newInstance();
@@ -173,15 +210,18 @@ const VTPViewer = () => {
         neuronsMapper.setScalarModeToUsePointData();
 
         // Load connections
+        setLoadingProgress(70);
         const connectionsResponse = await fetch(state.connections.fileUrl);
         if (isCancelled) return;
         const connectionsBuffer = await connectionsResponse.arrayBuffer();
         if (isCancelled) return;
 
+        setLoadingProgress(80);
         const connectionsReader = vtkXMLPolyDataReader.newInstance();
         context.current.readers.set('connections', connectionsReader);
         connectionsReader.parseAsArrayBuffer(connectionsBuffer);
 
+        setLoadingProgress(90);
         const connectionsMapper = vtkMapper.newInstance();
         context.current.mappers.set('connections', connectionsMapper);
         const connectionsActor = vtkActor.newInstance();
@@ -214,9 +254,15 @@ const VTPViewer = () => {
           restoreCameraState();
         }
 
+        setLoadingProgress(100);
         context.current.renderWindow.render();
       } catch (error) {
         console.error('Error loading VTP files:', error);
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+          setLoadingProgress(0);
+        }
       }
     };
 
@@ -248,14 +294,17 @@ const VTPViewer = () => {
       }
 
       context.current.renderWindow?.render();
-    }, 16); // Approximately 60fps
+    }, 100);
 
     return () => clearTimeout(timeoutId);
   }, [isInitialized, state.neurons.options, state.connections.options]);
 
   return (
     <ViewerContainer>
-      <VTKContainer ref={vtkContainerRef} />
+      <VTKContainer 
+        ref={vtkContainerRef}
+        sx={{ visibility: isInitialized ? 'visible' : 'hidden' }}
+      />
       <InfoOverlay>
         <StyledTypography>
           Simulation: {state.simulationType}
@@ -264,6 +313,19 @@ const VTPViewer = () => {
           Timestep: {state.currentTimestep.toLocaleString()}
         </StyledTypography>
       </InfoOverlay>
+      {isLoading && (
+        <LoadingOverlay>
+          <CircularProgress 
+            variant="determinate" 
+            value={loadingProgress} 
+            size={60}
+            sx={{ color: 'white' }}
+          />
+          <Typography sx={{ color: 'white' }}>
+            Loading... {loadingProgress}%
+          </Typography>
+        </LoadingOverlay>
+      )}
     </ViewerContainer>
   );
 };
