@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 
+
 def read_csv_safely(file_path):
     """
     Reads a CSV file with predefined column names and adds a global step column.
@@ -21,6 +22,7 @@ def read_csv_safely(file_path):
         df = pd.read_csv(file_path, delimiter=';', header=None, names=column_names, engine='python')
         df['step'] = df['step'].astype(int)
         df['global_step'] = df.index  # Add global step as row index
+
         return df
     except Exception as e:
         print(f"Error reading file {file_path}: {e}")
@@ -50,43 +52,51 @@ def extract_neuron_properties(data_dir, target_step, neuron_area_map):
     # Use tqdm to create a progress bar for the loop
     for neuron_id, area in tqdm(neuron_area_map.items(), desc="Processing Neurons", unit="neuron"):
         file_path = os.path.join(data_dir, f"0_{neuron_id}.csv")
-        
+
         if not os.path.exists(file_path):
             print(f"File not found: {file_path}")
             continue
 
         df = read_csv_safely(file_path)
-        if df is None:
+        if df is None or df.empty:
+            print(f"No data found in file for Neuron {neuron_id}")
+            continue
+        
+        
+        # Debugging global_step availability
+        if target_step not in df['global_step'].values:
+            print(f"No data for Neuron {neuron_id} at global_step {target_step}")
             continue
 
-        # Convert columns to numeric to handle potential type issues
-        numeric_columns = ['grown_axons', 'connected_axons', 'grown_dendrites', 'connected_dendrites']
-        for col in numeric_columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        # Filter for the target step
+        # Filter for the target global step
         step_data = df[df['global_step'] == target_step]
-        if not step_data.empty:
-            row = step_data.iloc[0]
-            records.append({
-                'Area': int(area.split('_')[1]),
-                'Neuron_ID': neuron_id,
-                'Step': target_step,
-                'Calcium': row['current_calcium'],
-                'Firing Rate': row['fired_fraction'],
-                'Grown Axons': row['grown_axons'],
-                'Connected Axons': row['connected_axons'],
-                'Grown Dendrites': row['grown_dendrites'],
-                'Connected Dendrites': row['connected_dendrites'],
-                'Total Growth': row['grown_axons'] + row['grown_dendrites'],
-                'Total Connections': row['connected_axons'] + row['connected_dendrites']
-            })
 
-    # Create DataFrame
+        if step_data.empty:
+            print(f"No data for Neuron {neuron_id} at global_step {target_step}")
+            continue
+
+        # Extract the row for the target step
+        row = step_data.iloc[0]
+        records.append({
+            'Area': int(area.split('_')[1]),
+            'Neuron_ID': neuron_id,
+            'Global Step': target_step,
+            'Calcium': row['current_calcium'],
+            'Firing Rate': row['fired_fraction'],
+            'Grown Axons': row['grown_axons'],
+            'Connected Axons': row['connected_axons'],
+            'Grown Dendrites': row['grown_dendrites'],
+            'Connected Dendrites': row['connected_dendrites'],
+            'Total Growth': row['grown_axons'] + row['grown_dendrites'],
+            'Total Connections': row['connected_axons'] + row['connected_dendrites']
+        })
+
+    if not records:
+        print("No data found for the specified global step.")
     return pd.DataFrame(records)
 
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+
+
 
 def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
     """
@@ -265,9 +275,9 @@ def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
 
 
 # Main execution
-data_dir = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/monitors'
+data_dir = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/monitors_test'
 positions_file = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/positions/rank_0_positions.txt'
-target_step = 1000  # Change to your desired global step
+target_step = 700  # Change to your desired global step
 
 # Parse positions file to create neuron-to-area mapping
 neuron_area_map = parse_positions_file(positions_file)
