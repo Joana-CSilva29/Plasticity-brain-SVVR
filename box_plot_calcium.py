@@ -213,45 +213,46 @@ def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
 
     # Update layout with bold and centered titles
     combined_fig.update_layout(
+        template='plotly_dark',  # Add this line to apply the "plotly_dark" theme
         updatemenus=[
             dict(
                 buttons=buttons,
                 direction="down",
                 showactive=True,
-                x=0.85,  # Place between the last two columns
+                x=0.85,
                 xanchor="center",
-                y=1.2,  # Adjust position within the parallel plot
+                y=1.2,
                 yanchor="top",
-                bgcolor="rgba(255, 255, 255, 1)",  # Opaque white background
-                bordercolor="black",
+                bordercolor="white",
                 borderwidth=1
-            )
-        ],
+        )
+    ],
         annotations=[
             dict(
-                text=f"<b>Neuron Properties (Time step: {target_step})</b>",  # Bold title
-                x=0.5,  # Center the title
-                y=1.15,  # Position higher to avoid overlap
+                text=f"<b>Neuron Properties (Time step: {target_step})</b>",
+                x=0.5,
+                y=1.15,
                 xref="paper",
                 yref="paper",
                 showarrow=False,
-                font=dict(size=18, family="Arial", color="black")  # Bold style
+                font=dict(size=18, family="Arial")
             ),
             dict(
-                text=f"<b>Calcium Levels by Area (Time step: {target_step})</b>",  # Bold title
-                x=0.5,  # Center the title
-                y=0.45,  # Position higher to avoid overlap
+                text=f"<b>Calcium Levels by Area (Time step: {target_step})</b>",
+                x=0.5,
+                y=0.45,
                 xref="paper",
                 yref="paper",
                 showarrow=False,
-                font=dict(size=18, family="Arial", color="black")  # Bold style
+                font=dict(size=18, family="Arial")
             )
         ],
-        font=dict(size=14),  # Set font size globally
-        height=1000,  # Adjust height for better spacing
-        margin=dict(t=200, b=50, l=50, r=50),  # Add margin for better layout
-        showlegend=False  # Hide the legend if unnecessary
+        font=dict(size=14),
+        height=1000,
+        margin=dict(t=200, b=50, l=50, r=50),
+        showlegend=False
     )
+
 
 
     # Save the plot as an HTML file
@@ -264,9 +265,9 @@ def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
 
 
 # Main execution
-data_dir = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network/monitors'
-positions_file = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network/positions/rank_0_positions.txt'
-target_step = 1000000  # Change to your desired global step
+data_dir = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/monitors'
+positions_file = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/positions/rank_0_positions.txt'
+target_step = 100  # Change to your desired global step
 
 # Parse positions file to create neuron-to-area mapping
 neuron_area_map = parse_positions_file(positions_file)

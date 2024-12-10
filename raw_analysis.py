@@ -1,14 +1,8 @@
 import plotly.graph_objects as go
-import pandas as pd
 import plotly.subplots as sp
-import plotly.graph_objects as go
 import numpy as np
 
-
 def read_plasticity_changes(file_path):
-    """
-    Reads plasticity changes file and extracts steps, creations, deletions, and net changes.
-    """
     steps, creations, deletions, net_changes = [], [], [], []
     try:
         with open(file_path, 'r') as file:
@@ -25,17 +19,12 @@ def read_plasticity_changes(file_path):
         return None, None, None, None
     return steps, creations, deletions, net_changes
 
-
 def read_neurons_with_std(file_path):
-    """
-    Reads neurons overview file and extracts key metrics including standard deviation.
-    """
     steps = []
     calcium_avg, calcium_std = [], []
     axons_avg, axons_std = [], []
     axons_c_avg, axons_c_std = [], []
     den_ex_avg, den_ex_std = [], []
-
     try:
         with open(file_path, 'r') as file:
             for line in file:
@@ -57,82 +46,101 @@ def read_neurons_with_std(file_path):
     return steps, calcium_avg, calcium_std, axons_avg, axons_std, axons_c_avg, axons_c_std, den_ex_avg, den_ex_std
 
 def plot_combined_plots_refined(plasticity_data, neurons_data, output_file):
-    """
-    Combines the plasticity changes subplots and neuron properties grid into a single HTML file.
-    Includes optimized layout with minimized gaps and no individual neuron subplot titles.
-    """
     colors = {
-        'no-network': 'rgba(0, 0, 255, 1)',  # Blue
+        'no-network': 'rgba(0, 0, 255, 1)',   # Blue
         'disabled': 'rgba(255, 165, 0, 1)',  # Orange
-        'calcium': 'rgba(0, 128, 0, 1)',  # Green
+        'calcium': 'rgba(0, 128, 0, 1)',     # Green
         'stimulus': 'rgba(128, 0, 128, 1)',  # Purple
     }
 
-    # Create a combined subplot layout
+    # Layout:
+    # Row 1: Plasticity Creations
+    # Row 2: Plasticity Deletions
+    # Row 3: Plasticity Net Changes
+    # Row 4: Neuron overview title
+    # Row 5: Neuron Calcium (col=1) & Axons (col=2)
+    # Row 6: Neuron Connected Axons (col=1) & Dendrites (col=2)
+
     fig = sp.make_subplots(
-        rows=7, cols=2,  # Adjust total rows and columns
+        rows=6, cols=2,
         specs=[
-            [{"colspan": 2}, None],  # Plasticity title row
-            [{"colspan": 2}, None],  # Plasticity row 1
-            [{"colspan": 2}, None],  # Plasticity row 2
-            [{"colspan": 2}, None],  # Plasticity row 3
-            [{"colspan": 2}, None],  # Neuron overview title
-            [{}, {}],  # Neuron row 1 (2 columns)
-            [{}, {}],  # Neuron row 2 (2 columns)
+            [{"colspan": 2}, None],  # Row 1: Plasticity Creations
+            [{"colspan": 2}, None],  # Row 2: Plasticity Deletions
+            [{"colspan": 2}, None],  # Row 3: Plasticity Net Changes
+            [{"colspan": 2}, None],  # Row 4: Neuron overview title
+            [{}, {}],                # Row 5: Neuron Calcium & Axons
+            [{}, {}],                # Row 6: Neuron Connected Axons & Dendrites
         ],
         vertical_spacing=0.02,
         horizontal_spacing=0.1
     )
 
-    # Plasticity generic title
+    simulations = list(plasticity_data.keys())  # ['no-network', 'disabled', 'calcium', 'stimulus']
+
+    # Add dummy traces for the legend to Row 1, so we have a single legend controlling all
+    for sim in simulations:
+        fig.add_trace(go.Scatter(
+            x=[np.nan], y=[np.nan],
+            mode='lines',
+            line=dict(color=colors[sim], width=2),
+            name=sim,
+            legendgroup=sim,
+            showlegend=True
+        ), row=1, col=1)
+
+    # Add the Plasticity title as an annotation at the top (no dedicated row needed)
     fig.add_annotation(
-        dict(
-            text="<b>Plasticity Changes Overview Across Simulations</b>",
-            x=0.5, y=0.99, xref="paper", yref="paper",  # Adjusted `y` for higher placement
-            showarrow=False, font=dict(size=18), align="center"
-        )
+        text="<b>Plasticity Changes Overview Across Simulations</b>",
+        x=0.5, y=1.03, xref="paper", yref="paper",
+        showarrow=False, font=dict(size=18), align="center"
     )
 
-    # Add plasticity subplots
     metrics = ["Creations", "Deletions", "Net Changes"]
     y_labels = ["Number of Creations", "Number of Deletions", "Number of Net Changes"]
+
+    # Plasticity plots:
+    # Creations: Row 1
+    # Deletions: Row 2
+    # Net Changes: Row 3
     for idx, (metric, y_label) in enumerate(zip(metrics, y_labels), start=1):
+        current_row = idx
         for label, data in plasticity_data.items():
             if data[0] is None:
                 continue
             steps, creations, deletions, net_changes = data
-            values = creations if metric == "Creations" else deletions if metric == "Deletions" else net_changes
+            values = creations if metric == "Creations" else (deletions if metric == "Deletions" else net_changes)
 
             fig.add_trace(go.Scatter(
                 x=steps, y=values, mode='lines',
-                name=label if idx == 1 else None,  # Show legend only once
                 line=dict(color=colors[label], width=2),
-                showlegend=(idx == 1)
-            ), row=idx + 1, col=1)
+                legendgroup=label,
+                showlegend=False
+            ), row=current_row, col=1)
 
-        fig.update_yaxes(title_text=y_label, row=idx + 1, col=1)
+        fig.update_yaxes(title_text=y_label, row=current_row, col=1)
         fig.update_xaxes(
             tickvals=[0, 0.2e6, 0.4e6, 0.6e6, 0.8e6, 1.0e6],
             ticktext=["0", "0.2M", "0.4M", "0.6M", "0.8M", "1M"],
-            title_text="Time Step" if idx == 3 else "",
-            row=idx + 1, col=1
+            title_text="Time Step" if metric == "Net Changes" else "",
+            row=current_row, col=1
         )
 
-    # Neuron overview generic title
+    # Neuron overview title on Row 4
     fig.add_annotation(
-        dict(
-            text="<b>Neuron Properties Overview Across Simulations</b>",
-            x=0.5, y=0.32, xref="paper", yref="paper",  # Adjusted `y` to center neurons section
-            showarrow=False, font=dict(size=18), align="center"
-        )
+        text="<b>Neuron Properties Overview Across Simulations</b>",
+        x=0.5, y=0.37, xref="paper", yref="paper",
+        showarrow=False, font=dict(size=18), align="center"
     )
 
-    # Add neuron grid subplots (correctly configured)
     neuron_metrics = ["Calcium", "Axons", "Connected Axons", "Dendrites"]
+
+    # We have 4 neuron metrics placed in a 2x2 grid:
+    # Row 5: Calcium (col=1), Axons (col=2)
+    # Row 6: Connected Axons (col=1), Dendrites (col=2)
     for idx, metric in enumerate(neuron_metrics, start=1):
-        row, col = divmod(idx - 1, 2)
-        row += 6  # Neuron grid starts from row 6
-        col += 1
+        row_offset, col_offset = divmod(idx - 1, 2)
+        row = 5 + row_offset  # Row 5 or 6
+        col = 1 + col_offset  # Col 1 or 2
 
         for label, data in neurons_data.items():
             if data[0] is None:
@@ -148,9 +156,9 @@ def plot_combined_plots_refined(plasticity_data, neurons_data, output_file):
 
             fig.add_trace(go.Scatter(
                 x=steps, y=avg, mode='lines',
-                name=label if idx == 1 else None,  # Show legend only in the first neuron plot
                 line=dict(color=colors[label], width=2),
-                showlegend=(idx == 1)
+                legendgroup=label,
+                showlegend=False
             ), row=row, col=col)
 
             fig.add_trace(go.Scatter(
@@ -159,6 +167,7 @@ def plot_combined_plots_refined(plasticity_data, neurons_data, output_file):
                 fill='toself',
                 fillcolor=colors[label].replace("1)", "0.2)"),
                 line=dict(width=0),
+                legendgroup=label,
                 showlegend=False
             ), row=row, col=col)
 
@@ -166,24 +175,34 @@ def plot_combined_plots_refined(plasticity_data, neurons_data, output_file):
         fig.update_xaxes(
             tickvals=[0, 0.2e6, 0.4e6, 0.6e6, 0.8e6, 1.0e6],
             ticktext=["0", "0.2M", "0.4M", "0.6M", "0.8M", "1M"],
-            title_text="Time Step" if row == 7 else "",
+            title_text="Time Step" if row == 6 else "",
             row=row, col=col
         )
 
+    # Hide axes for the dummy traces on Row 1 if needed (they already have data now)
+    # If you don't want any axes on Row 1, but currently we place plasticity creations there:
+    # you can leave them as is since now they show the first metric.
+    # If you intended row 1 only for dummy traces, adjust indexing accordingly.
+
     # Update layout
     fig.update_layout(
-        height=2000,  # Combined height for both plots
-        width=1400,  # Full-page width
-        template="plotly_dark",  # Dark theme
-        showlegend=False,
-        margin=dict(l=10, r=0, t=0, b=10)  # Reduce top margin
+        height=1900,
+        width=1400,
+        template="plotly_dark",
+        margin=dict(l=50, r=50, t=50, b=50),
+        showlegend=True,
+        legend=dict(
+            orientation='h',
+            x=0.5,
+            y=1.05,
+            xanchor='center',
+            yanchor='bottom'
+        )
     )
 
-    # Save combined HTML
     fig.write_html(output_file)
     print(f"Combined interactive plot saved to {output_file}")
 
-    
 # Paths for the simulations
 simulations = {
     'no-network': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/',
@@ -192,17 +211,14 @@ simulations = {
     'stimulus': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-stimulus/',
 }
 
-# Process plasticity changes data
 plasticity_data = {}
 for label, path in simulations.items():
     plasticity_file = f"{path}rank_0_plasticity_changes.txt"
     plasticity_data[label] = read_plasticity_changes(plasticity_file)
 
-# Process neurons overview data
 neurons_data = {}
 for label, path in simulations.items():
     neurons_file = f"{path}rank_0_neurons_overview.txt"
     neurons_data[label] = read_neurons_with_std(neurons_file)
 
-# Generate the combined plot
 plot_combined_plots_refined(plasticity_data, neurons_data, "combined_plots_refined.html")
