@@ -69,7 +69,7 @@ def calculate_area_centroids(points, point_areas):
 
 
 def create_neurons_polydata(points, point_areas, area_to_id, num_areas):
-    """Create vtkPolyData for neurons with area-based colors."""
+    """Create vtkPolyData for neurons with area-based colors and labels."""
     polydata = vtk.vtkPolyData()
     polydata.SetPoints(points)
 
@@ -79,7 +79,6 @@ def create_neurons_polydata(points, point_areas, area_to_id, num_areas):
         vertices.InsertNextCell(1)
         vertices.InsertCellPoint(i)
     
-    # Add vertices to polydata
     polydata.SetVerts(vertices)
 
     # Add area-based colors
@@ -87,22 +86,43 @@ def create_neurons_polydata(points, point_areas, area_to_id, num_areas):
     colors.SetName("Colors")
     colors.SetNumberOfComponents(3)
 
-    # Create lookup table for area colors
-    lut = vtk.vtkLookupTable()
-    lut.SetNumberOfTableValues(num_areas)
-    lut.Build()
+    # Define a color mapping for each area
+    unique_areas = sorted(set(point_areas))
+    area_color_map = {}
+    
+    # Generate distinct colors for each area
+    for i, area in enumerate(unique_areas):
+        # Create a rainbow color scheme
+        hue = i / len(unique_areas)
+        # Convert HSV to RGB (assuming S=1, V=1)
+        if hue < 1/6:
+            rgb = (255, int(255 * 6 * hue), 0)
+        elif hue < 2/6:
+            rgb = (int(255 * (2 - 6 * hue)), 255, 0)
+        elif hue < 3/6:
+            rgb = (0, 255, int(255 * (6 * hue - 2)))
+        elif hue < 4/6:
+            rgb = (0, int(255 * (4 - 6 * hue)), 255)
+        elif hue < 5/6:
+            rgb = (int(255 * (6 * hue - 4)), 0, 255)
+        else:
+            rgb = (255, 0, int(255 * (6 - 6 * hue)))
+        area_color_map[area] = rgb
 
-    # Assign random colors to each area
-    for i in range(num_areas):
-        lut.SetTableValue(i, random.random(), random.random(), random.random(), 1.0)
+    # Add area labels as a string array
+    areaLabels = vtk.vtkStringArray()
+    areaLabels.SetName("AreaLabels")
+    areaLabels.SetNumberOfComponents(1)
 
-    # Set colors for each point based on its area
+    # Set colors and labels for each point based on its area
     for area_id in point_areas:
-        index = area_to_id[area_id]
-        rgb = lut.GetTableValue(index)
-        colors.InsertNextTuple3(int(255 * rgb[0]), int(255 * rgb[1]), int(255 * rgb[2]))
+        rgb = area_color_map[area_id]
+        colors.InsertNextTuple3(rgb[0], rgb[1], rgb[2])
+        areaLabels.InsertNextValue(area_id)  # Store the original area name
 
     polydata.GetPointData().SetScalars(colors)
+    polydata.GetPointData().AddArray(areaLabels)
+    
     return polydata
 
 
@@ -162,15 +182,33 @@ def create_connections_polydata(area_centroids, in_connections, out_connections,
     # Create tube filter
     tubeFilter = vtk.vtkTubeFilter()
     tubeFilter.SetInputData(polydata)
-    tubeFilter.SetRadius(0.05)  # Match the default radius from frontend
-    tubeFilter.SetNumberOfSides(6)  # Match the optimized sides from frontend
-    tubeFilter.SetCapping(False)  # Match frontend setting
-    tubeFilter.SetVaryRadius(0)  # Constant radius
+    tubeFilter.SetRadius(0.05)
+    tubeFilter.SetNumberOfSides(6)
+    tubeFilter.SetCapping(False)
+    tubeFilter.SetVaryRadius(0)
     tubeFilter.Update()
 
-    # Get the output and preserve the connection type scalar data
+    # Get the output and create a new array for the tube cells
     output = tubeFilter.GetOutput()
-    output.GetCellData().SetScalars(connectionTypes)
+    tubeCellTypes = vtk.vtkUnsignedCharArray()
+    tubeCellTypes.SetName("ConnectionType")
+    tubeCellTypes.SetNumberOfComponents(1)
+    
+    # Each line becomes multiple cells in the tube - need to replicate the scalar value
+    cellsPerLine = tubeFilter.GetNumberOfSides()  # Number of cells per tube segment
+    for i in range(connectionTypes.GetNumberOfTuples()):
+        value = connectionTypes.GetValue(i)
+        # Replicate the value for each cell in the tube
+        for _ in range(cellsPerLine):
+            tubeCellTypes.InsertNextValue(value)
+    
+    output.GetCellData().SetScalars(tubeCellTypes)
+    
+    # Debug logs
+    print(f"Number of points: {output.GetNumberOfPoints()}")
+    print(f"Number of cells: {output.GetNumberOfCells()}")
+    print(f"Connection types array size: {tubeCellTypes.GetNumberOfTuples()}")
+    print(f"First few connection types: {[tubeCellTypes.GetValue(i) for i in range(min(5, tubeCellTypes.GetNumberOfTuples()))]}")
     
     return output
 
@@ -261,7 +299,7 @@ def create_empty_connections_polydata():
 
 
 def main():
-    base_ssd_path = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR'
+    base_ssd_path = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23'
     
     # Define simulation configurations
     simulations = {

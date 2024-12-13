@@ -99,7 +99,7 @@ function App() {
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
             }}>
-              VTP Viewer
+              Brain Visualisation
             </Typography>
           </StyledToolbar>
         </StyledAppBar>

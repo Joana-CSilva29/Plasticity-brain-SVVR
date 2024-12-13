@@ -88,7 +88,7 @@ const VTKControls = ({ isLoading }) => {
               value={currentSource.options.pointSize}
               onChange={(_, value) => handleUpdate('pointSize', value)}
               min={1}
-              max={10}
+              max={20}
               valueLabelDisplay="auto"
             />
           </SliderContainer>
