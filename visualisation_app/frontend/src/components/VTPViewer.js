@@ -8,7 +8,7 @@ import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransf
 import vtkPixelSpaceCallbackMapper from '@kitware/vtk.js/Rendering/Core/PixelSpaceCallbackMapper';
 import vtk from '@kitware/vtk.js/vtk';
 import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget';
-import vtkAxesActor from '@kitware/vtk.js/Rendering/Core/AxesActor';
+import vtkAnnotatedCubeActor from '@kitware/vtk.js/Rendering/Core/AnnotatedCubeActor';
 import { styled, useTheme } from '@mui/material/styles';
 import { Box, Typography, CircularProgress, Button } from '@mui/material';
 import { useVTKState } from '../context/VTKContext';
@@ -272,24 +272,62 @@ const VTPViewer = () => {
       background: [0.1, 0.1, 0.1],
     });
 
-    // Add orientation widget
-    const axesActor = vtkAxesActor.newInstance();
-    const orientationWidget = vtkOrientationMarkerWidget.newInstance({
-      actor: axesActor,
-      interactor: fullScreenRenderer.getInteractor(),
-    });
-
-    // Set the color of the axes to match theme
+    // Create annotated cube actor
+    const axes = vtkAnnotatedCubeActor.newInstance();
+    
+    // Set the color of the axes using theme-based colors
     const themeColor = theme.palette.primary.main;
     const rgbColor = hexToRgb(themeColor);
     if (rgbColor) {
-      const normalizedColor = [rgbColor.r / 255, rgbColor.g / 255, rgbColor.b / 255];
-      
-      // Set colors for the axes
-      axesActor.setXAxisColor(...normalizedColor);
-      axesActor.setYAxisColor(...normalizedColor);
-      axesActor.setZAxisColor(...normalizedColor);
+      const xColor = `rgb(${rgbColor.r}, ${rgbColor.g}, ${rgbColor.b})`;  // Original
+      const yColor = `rgb(${Math.min(255, rgbColor.r + 40)}, ${Math.min(255, rgbColor.g + 40)}, ${Math.min(255, rgbColor.b + 40)})`; // Lighter
+      const zColor = `rgb(${Math.max(0, rgbColor.r - 40)}, ${Math.max(0, rgbColor.g - 40)}, ${Math.max(0, rgbColor.b - 40)})`; // Darker
+
+      // Configure the cube faces with theme colors and labels
+      axes.setDefaultStyle({
+        text: '',
+        faceColor: xColor,
+        edgeThickness: 0.1,
+        edgeColor: 'rgb(255, 255, 255)',
+        resolution: 400,
+      });
+
+      axes.setXPlusFaceProperty({ 
+        text: 'A', 
+        faceColor: xColor,
+        faceRotation: 90 
+      });
+      axes.setXMinusFaceProperty({ 
+        text: 'P', 
+        faceColor: xColor,
+        faceRotation: -90 
+      });
+      axes.setYPlusFaceProperty({ 
+        text: 'L', 
+        faceColor: yColor,
+        faceRotation: 180 
+      });
+      axes.setYMinusFaceProperty({ 
+        text: 'R', 
+        faceColor: yColor,
+        faceRotation: 0 
+      });
+      axes.setZPlusFaceProperty({ 
+        text: 'S', 
+        faceColor: zColor,
+        faceRotation: 0 
+      });
+      axes.setZMinusFaceProperty({ 
+        text: 'I', 
+        faceColor: zColor,
+        faceRotation: 0 
+      });
     }
+
+    const orientationWidget = vtkOrientationMarkerWidget.newInstance({
+      actor: axes,
+      interactor: fullScreenRenderer.getInteractor(),
+    });
 
     orientationWidget.setEnabled(true);
     orientationWidget.setViewportCorner(
@@ -1475,22 +1513,32 @@ const VTPViewer = () => {
       >
         {showLabels ? 'Hide Labels' : 'Show Labels'}
       </ToggleButton>
-      <Box sx={{ position: 'absolute', top: '10px', right: '10px', zIndex: 1 }}>
-        <Button variant="contained" onClick={() => setCameraPosition('front')} sx={{ m: 1 }}>
-          Front View
-        </Button>
-        <Button variant="contained" onClick={() => setCameraPosition('top')} sx={{ m: 1 }}>
-          Top View
-        </Button>
-        <Button variant="contained" onClick={() => setCameraPosition('right')} sx={{ m: 1 }}>
-          Right View
-        </Button>
+      <Box sx={{ 
+        position: 'absolute', 
+        top: '10px', 
+        right: '10px', 
+        zIndex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-end'
+      }}>
+        <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+          <Button variant="contained" onClick={() => setCameraPosition('front')} sx={{ m: 1 }}>
+            Front View
+          </Button>
+          <Button variant="contained" onClick={() => setCameraPosition('top')} sx={{ m: 1 }}>
+            Top View
+          </Button>
+          <Button variant="contained" onClick={() => setCameraPosition('right')} sx={{ m: 1 }}>
+            Right View
+          </Button>
+        </Box>
         {state.simulationType === SIMULATION_TYPES.CALCIUM && (
           <Button 
             variant="contained" 
             onClick={() => focusHighestDifference().catch(console.error)} 
             sx={{ 
-              m: 1,
+              width: '100%',
               background: theme.palette.gradients.blue,
               '&:hover': {
                 background: theme.palette.gradients.blue,
