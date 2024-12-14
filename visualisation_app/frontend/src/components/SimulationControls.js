@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { 
   Box, 
   MenuItem,
@@ -6,12 +6,14 @@ import {
   Typography,
   Stack,
   Paper,
-  TextField
+  TextField,
+  Slider
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { useVTKState, useVTKDispatch, SIMULATION_TYPES } from '../context/VTKContext';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
+import VisualizationModeToggle from './VisualizationModeToggle';
 
 const StyledSelect = styled(TextField)(({ theme }) => ({
   '& .MuiInputBase-input': {
@@ -91,6 +93,25 @@ const StyledButton = styled(Button)(({ theme }) => ({
   },
 }));
 
+const StyledSlider = styled(Slider)(({ theme }) => ({
+  '& .MuiSlider-rail': {
+    opacity: 0.3,
+    backgroundColor: theme.palette.primary.light,
+  },
+  '& .MuiSlider-track': {
+    background: theme.palette.gradients.blue,
+    border: 'none',
+  },
+  '& .MuiSlider-thumb': {
+    width: 20,
+    height: 20,
+    backgroundColor: theme.palette.primary.main,
+    '&:hover, &.Mui-focusVisible': {
+      boxShadow: `0px 0px 0px 8px ${theme.palette.primary.main}33`,
+    },
+  },
+}));
+
 const SimulationControls = () => {
   const state = useVTKState();
   const dispatch = useVTKDispatch();
@@ -98,6 +119,11 @@ const SimulationControls = () => {
   const handleSimulationChange = (event) => {
     dispatch({ type: 'SET_SIMULATION_TYPE', payload: event.target.value });
   };
+
+  const handleSliderChange = useCallback((_, value) => {
+    const roundedValue = Math.round(value / state.stepSize) * state.stepSize;
+    dispatch({ type: 'SET_TIMESTEP', payload: roundedValue });
+  }, [dispatch, state.stepSize]);
 
   const handleTimestepChange = (change) => {
     const newValue = state.currentTimestep + change;
@@ -134,7 +160,8 @@ const SimulationControls = () => {
         <StyledTypography variant="subtitle2">
           Timestep
         </StyledTypography>
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+        
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', width: '100%' }}>
           <StyledButton
             variant="outlined"
             onClick={() => handleTimestepChange(-state.stepSize)}
@@ -161,9 +188,45 @@ const SimulationControls = () => {
             <AddIcon />
           </StyledButton>
         </Box>
+
+        <Box sx={{ width: '100%', mt: 2, px: 1 }}>
+          <StyledSlider
+            value={state.currentTimestep}
+            onChange={handleSliderChange}
+            min={0}
+            max={state.maxTimestep}
+            step={state.stepSize}
+            valueLabelDisplay="auto"
+            valueLabelFormat={value => value.toLocaleString()}
+            aria-label="Timestep"
+          />
+        </Box>
       </TimestepControl>
+
+      <Paper 
+        elevation={0} 
+        sx={{ 
+          p: 2, 
+          bgcolor: 'rgba(255, 255, 255, 0.03)',
+          borderRadius: 1,
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          width: '100%'
+        }}
+      >
+        <Typography 
+          variant="subtitle2" 
+          sx={{ 
+            mb: 1.5, 
+            color: 'rgba(255, 255, 255, 0.7)',
+            fontWeight: 500 
+          }}
+        >
+          Visualization Mode
+        </Typography>
+        <VisualizationModeToggle />
+      </Paper>
     </Stack>
   );
 };
 
-export default SimulationControls; 
+export default React.memo(SimulationControls); 

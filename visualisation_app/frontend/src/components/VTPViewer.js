@@ -7,10 +7,13 @@ import vtkXMLPolyDataReader from '@kitware/vtk.js/IO/XML/XMLPolyDataReader';
 import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction';
 import vtkPixelSpaceCallbackMapper from '@kitware/vtk.js/Rendering/Core/PixelSpaceCallbackMapper';
 import vtk from '@kitware/vtk.js/vtk';
+import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget';
+import vtkAxesActor from '@kitware/vtk.js/Rendering/Core/AxesActor';
 import { styled } from '@mui/material/styles';
 import { Box, Typography, CircularProgress, Button } from '@mui/material';
 import { useVTKState } from '../context/VTKContext';
 import Tooltip from './Tooltip';
+import { SIMULATION_TYPES, VISUALIZATION_MODES } from '../context/VTKContext';
 
 const ViewerContainer = styled(Box)({
   width: '100%',
@@ -67,6 +70,87 @@ const LoadingOverlay = styled(Box)({
   gap: '16px',
 });
 
+const ToggleButton = styled(Button)(({ theme }) => ({
+  position: 'absolute',
+  top: '10px',
+  left: '10px',
+  zIndex: 1,
+  backgroundColor: props => props.active ? theme.palette.primary.main : 'rgba(255, 255, 255, 0.05)',
+  borderColor: props => props.active ? theme.palette.primary.main : 'rgba(255, 255, 255, 0.1)',
+  '&:hover': {
+    backgroundColor: props => props.active ? theme.palette.primary.dark : 'rgba(255, 255, 255, 0.1)',
+    borderColor: props => props.active ? theme.palette.primary.dark : 'rgba(255, 255, 255, 0.2)',
+  }
+}));
+
+const ColorLegend = styled(Box)(({ theme }) => ({
+  position: 'absolute',
+  bottom: theme.spacing(2),
+  left: '50%',
+  transform: 'translateX(-50%)',
+  background: 'rgba(0, 0, 0, 0.7)',
+  padding: theme.spacing(1),
+  borderRadius: theme.shape.borderRadius,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: theme.spacing(1),
+  zIndex: 1,
+  minWidth: '200px',
+}));
+
+const findClosestTimestepIndex = (timesteps, targetTime) => {
+  if (!timesteps?.length) return -1;
+  
+  return timesteps.reduce((closest, current, index) => {
+    const currentDiff = Math.abs(current - targetTime);
+    const closestDiff = Math.abs(timesteps[closest] - targetTime);
+    return currentDiff < closestDiff ? index : closest;
+  }, 0);
+};
+
+const calculateCalciumDifference = (currentLevel, targetLevel) => {
+  if (typeof currentLevel !== 'number' || typeof targetLevel !== 'number') {
+    return 0;
+  }
+  return Math.abs(currentLevel - targetLevel) / targetLevel;
+};
+
+const useCalciumVisualization = (calciumData, currentTimestep) => {
+  return useMemo(() => {
+    if (!calciumData?.timesteps?.length || !calciumData?.areas) {
+      return null;
+    }
+
+    const timeIndex = findClosestTimestepIndex(calciumData.timesteps, currentTimestep);
+    if (timeIndex === -1) {
+      console.warn('No valid timestep found for calcium visualization');
+      return null;
+    }
+
+    const areaData = new Map();
+    Object.entries(calciumData.areas).forEach(([areaId, data]) => {
+      const currentLevel = data.calcium_levels[timeIndex];
+      const targetLevel = data.target_calcium;
+      
+      if (typeof currentLevel === 'number' && typeof targetLevel === 'number') {
+        areaData.set(areaId, {
+          difference: calculateCalciumDifference(currentLevel, targetLevel),
+          currentLevel,
+          targetLevel,
+          neuronCount: data.neuron_count
+        });
+      }
+    });
+
+    return {
+      timeIndex,
+      timestamp: calciumData.timesteps[timeIndex],
+      areaData
+    };
+  }, [calciumData, currentTimestep]);
+};
+
 const VTPViewer = () => {
   const state = useVTKState();
   const vtkContainerRef = useRef(null);
@@ -88,22 +172,30 @@ const VTPViewer = () => {
     readers: new Map(),
     mappers: new Map(),
     lookupTables: new Map(),
+    lastSimulationType: null,
+    lastTimestep: null,
   });
   const labelPositions = useRef(new Map());
   const [tooltipInfo, setTooltipInfo] = useState(null);
   const [tooltipPosition, setTooltipPosition] = useState(null);
   const [brodmannInfo, setBrodmannInfo] = useState(new Map());
+  const [calciumData, setCalciumData] = useState(null);
+  const [loadingStates, setLoadingStates] = useState({
+    neurons: false,
+    connections: false
+  });
+
+  // Add the calcium visualization data at component level
+  const calciumViz = useCalciumVisualization(calciumData, state.currentTimestep);
 
   const cleanupVTKObjects = useCallback(() => {
-    // Clean up readers
+    // Always clean up readers, mappers, and lookup tables
     context.current.readers.forEach(reader => reader.delete());
     context.current.readers.clear();
 
-    // Clean up mappers
     context.current.mappers.forEach(mapper => mapper.delete());
     context.current.mappers.clear();
 
-    // Clean up lookup tables
     context.current.lookupTables.forEach(lut => lut.delete());
     context.current.lookupTables.clear();
 
@@ -115,6 +207,15 @@ const VTPViewer = () => {
       actor.delete();
     });
     context.current.actors.clear();
+
+    // Reset last simulation type
+    context.current.lastSimulationType = null;
+    context.current.lastTimestep = null;
+    
+    // Render the empty scene
+    if (context.current.renderWindow) {
+      context.current.renderWindow.render();
+    }
   }, []);
 
   const saveCameraState = useCallback(() => {
@@ -150,48 +251,52 @@ const VTPViewer = () => {
 
   // Initialize VTK viewer
   useEffect(() => {
-    if (!containerReady || isInitialized) return;
+    if (!containerReady || !vtkContainerRef.current) return;
 
-    const container = vtkContainerRef.current;
-    if (!container) return;
+    // Create the fullscreen window
+    const fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
+      rootContainer: vtkContainerRef.current,
+      background: [0.1, 0.1, 0.1],
+    });
 
-    try {
-      // Make sure container has dimensions
-      if (container.getBoundingClientRect().width === 0) return;
+    // Add orientation widget
+    const axesActor = vtkAxesActor.newInstance();
+    const orientationWidget = vtkOrientationMarkerWidget.newInstance({
+      actor: axesActor,
+      interactor: fullScreenRenderer.getInteractor(),
+    });
+    orientationWidget.setEnabled(true);
+    orientationWidget.setViewportCorner(
+      vtkOrientationMarkerWidget.Corners.BOTTOM_RIGHT
+    );
+    orientationWidget.setViewportSize(0.15);
+    orientationWidget.setMinPixelSize(100);
+    orientationWidget.setMaxPixelSize(300);
 
-      context.current.fullScreenRenderWindow = vtkFullScreenRenderWindow.newInstance({
-        rootContainer: container,
-        background: [0.1, 0.1, 0.1],
-      });
+    // Store references
+    context.current.fullScreenRenderWindow = fullScreenRenderer;
+    context.current.renderer = fullScreenRenderer.getRenderer();
+    context.current.renderWindow = fullScreenRenderer.getRenderWindow();
+    context.current.orientationWidget = orientationWidget;
 
-      context.current.renderer = context.current.fullScreenRenderWindow.getRenderer();
-      context.current.renderWindow = context.current.fullScreenRenderWindow.getRenderWindow();
-      
-      // Set initial camera position to view from front-right-top
-      const camera = context.current.renderer.getActiveCamera();
-      camera.setPosition(100, 100, 100);  // Position camera at front-right-top
-      camera.setFocalPoint(0, 0, 0);      // Look at center
-      camera.setViewUp(0, 0, 1);          // Keep "up" direction
-      context.current.renderer.resetCamera();
+    // Set initial camera position
+    const camera = context.current.renderer.getActiveCamera();
+    camera.setPosition(0, 0, 5);
+    camera.setFocalPoint(0, 0, 0);
+    camera.setViewUp(0, 1, 0);
 
-      setIsInitialized(true);
-    } catch (error) {
-      console.error('Error initializing VTK viewer:', error);
-    }
+    setIsInitialized(true);
 
+    // Cleanup
     return () => {
-      if (context.current.fullScreenRenderWindow) {
-        try {
-          cleanupVTKObjects();
-          context.current.fullScreenRenderWindow.delete();
-          context.current.fullScreenRenderWindow = null;
-          context.current.renderer = null;
-          context.current.renderWindow = null;
-          setIsInitialized(false);
-        } catch (error) {
-          console.error('Error cleaning up VTK viewer:', error);
-        }
+      if (context.current.orientationWidget) {
+        context.current.orientationWidget.setEnabled(false);
+        context.current.orientationWidget.delete();
       }
+      if (context.current.fullScreenRenderWindow) {
+        context.current.fullScreenRenderWindow.delete();
+      }
+      cleanupVTKObjects();
     };
   }, [containerReady, cleanupVTKObjects]);
 
@@ -203,105 +308,185 @@ const VTPViewer = () => {
 
     const loadData = async () => {
       try {
-        setIsLoading(true);
+        let isLoadingAnything = false;
         setLoadingProgress(0);
         saveCameraState();
-        cleanupVTKObjects();
 
-        // Load neurons first
-        setLoadingProgress(20);
-        const neuronsResponse = await fetch(state.neurons.fileUrl);
-        if (isCancelled) return;
-        const neuronsBuffer = await neuronsResponse.arrayBuffer();
-        if (isCancelled) return;
+        // Clean up existing objects when simulation type changes
+        if (context.current.lastSimulationType !== state.simulationType) {
+          cleanupVTKObjects();
+        }
 
-        setLoadingProgress(40);
-        const neuronsReader = vtkXMLPolyDataReader.newInstance();
-        context.current.readers.set('neurons', neuronsReader);
-        neuronsReader.parseAsArrayBuffer(neuronsBuffer);
-
-        setLoadingProgress(60);
-        const neuronsMapper = vtkMapper.newInstance();
-        context.current.mappers.set('neurons', neuronsMapper);
-        const neuronsActor = vtkActor.newInstance();
-        neuronsActor.setMapper(neuronsMapper);
-        neuronsMapper.setInputData(neuronsReader.getOutputData(0));
-        neuronsMapper.setScalarVisibility(true);
-        neuronsMapper.setScalarModeToUsePointData();
-
-        // Store and add neurons actor
-        context.current.actors.set('neurons', neuronsActor);
-        context.current.renderer.addActor(neuronsActor);
-
-        // Try to load connections
-        try {
-          setLoadingProgress(70);
-          const connectionsResponse = await fetch(state.connections.fileUrl);
-          if (!connectionsResponse.ok) {
-            throw new Error('Connections not available');
-          }
-          if (isCancelled) return;
-          const connectionsBuffer = await connectionsResponse.arrayBuffer();
-          if (isCancelled) return;
-
-          setLoadingProgress(80);
-          const connectionsReader = vtkXMLPolyDataReader.newInstance();
-          context.current.readers.set('connections', connectionsReader);
-          connectionsReader.parseAsArrayBuffer(connectionsBuffer);
-
-          const output = connectionsReader.getOutputData(0);
-          console.log('Connections data:', {
-            numberOfPoints: output.getNumberOfPoints(),
-            numberOfCells: output.getNumberOfCells(),
-            arrays: output.getCellData().getArrays().map(arr => ({
-              name: arr.getName(),
-              numberOfComponents: arr.getNumberOfComponents(),
-              dataRange: arr.getRange()
-            }))
-          });
-
-          setLoadingProgress(90);
-          const connectionsMapper = vtkMapper.newInstance();
-          context.current.mappers.set('connections', connectionsMapper);
-          const connectionsActor = vtkActor.newInstance();
-          connectionsActor.setMapper(connectionsMapper);
-          connectionsMapper.setInputData(connectionsReader.getOutputData(0));
-
-          // Add back the LUT creation
-          const lut = vtkColorTransferFunction.newInstance();
-          context.current.lookupTables.set('connections', lut);
-          lut.addRGBPoint(0, ...state.connections.options.inColor);
-          lut.addRGBPoint(1, ...state.connections.options.outColor);
-
-          // Simple mapper configuration
-          connectionsMapper.setScalarVisibility(true);
-          connectionsMapper.setScalarModeToUseCellData();
-          connectionsMapper.setColorModeToMapScalars();
-          connectionsMapper.setLookupTable(lut);
-          connectionsMapper.setScalarRange(0, 1);
-
-          // Make sure the actor is visible
-          connectionsActor.getProperty().setOpacity(1.0);
-          connectionsActor.setVisibility(true);
-
-          // Store and add connections actor
-          context.current.actors.set('connections', connectionsActor);
-          context.current.renderer.addActor(connectionsActor);
-
-          if (connectionsActor) {
-            // Set the representation to Surface to properly display tubes
-            connectionsActor.getProperty().setRepresentationToSurface();
+        // Load neurons if needed
+        if (state.visualizationMode !== VISUALIZATION_MODES.CONNECTIONS_ONLY) {
+          const needsNeuronLoad = !context.current.actors.get('neurons') || 
+                                 context.current.lastSimulationType !== state.simulationType;
+          
+          if (needsNeuronLoad) {
+            isLoadingAnything = true;
+            setLoadingStates(prev => ({ ...prev, neurons: true }));
             
-            // Optional: Add some lighting effects for better tube visualization
-            connectionsActor.getProperty().setLighting(true);
-            connectionsActor.getProperty().setInterpolationToPhong();
-            connectionsActor.getProperty().setAmbient(0.1);
-            connectionsActor.getProperty().setDiffuse(0.7);
-            connectionsActor.getProperty().setSpecular(0.3);
-            connectionsActor.getProperty().setSpecularPower(20);
+            setLoadingProgress(20);
+            const neuronsResponse = await fetch(state.neurons.fileUrl);
+            if (isCancelled) return;
+            const neuronsBuffer = await neuronsResponse.arrayBuffer();
+            if (isCancelled) return;
+
+            setLoadingProgress(40);
+            const neuronsReader = vtkXMLPolyDataReader.newInstance();
+            context.current.readers.set('neurons', neuronsReader);
+            neuronsReader.parseAsArrayBuffer(neuronsBuffer);
+
+            setLoadingProgress(60);
+            const neuronsMapper = vtkMapper.newInstance();
+            context.current.mappers.set('neurons', neuronsMapper);
+            const neuronsActor = vtkActor.newInstance();
+            neuronsActor.setMapper(neuronsMapper);
+            neuronsMapper.setInputData(neuronsReader.getOutputData(0));
+
+            // Store and add neurons actor
+            context.current.actors.set('neurons', neuronsActor);
+            context.current.renderer.addActor(neuronsActor);
+            
+            // Store the current simulation type
+            context.current.lastSimulationType = state.simulationType;
+
+            setLoadingStates(prev => ({ ...prev, neurons: false }));
           }
-        } catch (error) {
-          console.log('No connections data available for this timestep');
+
+          // Update visibility
+          const neuronsActor = context.current.actors.get('neurons');
+          if (neuronsActor) {
+            neuronsActor.setVisibility(true);
+            context.current.renderWindow.render();
+          }
+        } else {
+          const neuronsActor = context.current.actors.get('neurons');
+          if (neuronsActor) {
+            neuronsActor.setVisibility(false);
+            context.current.renderWindow.render();
+          }
+        }
+
+        // Load connections if needed
+        if (state.visualizationMode !== VISUALIZATION_MODES.NEURONS_ONLY) {
+          const needsConnectionLoad = !context.current.actors.get('connections') || 
+                                    state.currentTimestep !== context.current.lastTimestep;
+          
+          if (needsConnectionLoad) {
+            try {
+              isLoadingAnything = true;
+              setLoadingStates(prev => ({ ...prev, connections: true }));
+              setLoadingProgress(70);
+              console.log('Loading connections from:', state.connections.fileUrl);
+              
+              const connectionsResponse = await fetch(state.connections.fileUrl);
+              if (!connectionsResponse.ok) {
+                throw new Error(`Connections not available: ${state.connections.fileUrl}`);
+              }
+              if (isCancelled) return;
+              
+              const connectionsBuffer = await connectionsResponse.arrayBuffer();
+              if (isCancelled) return;
+
+              setLoadingProgress(80);
+              
+              // Clean up old connections
+              const oldActor = context.current.actors.get('connections');
+              if (oldActor) {
+                context.current.renderer.removeActor(oldActor);
+                oldActor.delete();
+              }
+
+              const oldMapper = context.current.mappers.get('connections');
+              if (oldMapper) {
+                oldMapper.delete();
+              }
+
+              const oldReader = context.current.readers.get('connections');
+              if (oldReader) {
+                oldReader.delete();
+              }
+
+              // Create new reader and parse data
+              const connectionsReader = vtkXMLPolyDataReader.newInstance();
+              context.current.readers.set('connections', connectionsReader);
+              connectionsReader.parseAsArrayBuffer(connectionsBuffer);
+
+              const output = connectionsReader.getOutputData(0);
+              if (!output) {
+                throw new Error('Failed to read connections data');
+              }
+
+              console.log('Loaded connections data:', {
+                timestep: state.currentTimestep,
+                numberOfPoints: output.getNumberOfPoints(),
+                numberOfCells: output.getNumberOfCells(),
+                arrays: output.getCellData().getArrays().map(arr => ({
+                  name: arr.getName(),
+                  numberOfComponents: arr.getNumberOfComponents(),
+                  dataRange: arr.getRange()
+                }))
+              });
+
+              setLoadingProgress(90);
+
+              // Create mapper and actor
+              const connectionsMapper = vtkMapper.newInstance();
+              context.current.mappers.set('connections', connectionsMapper);
+              connectionsMapper.setInputData(output);
+
+              const actor = vtkActor.newInstance();
+              context.current.actors.set('connections', actor);
+              actor.setMapper(connectionsMapper);
+
+              // Set up color mapping
+              const lut = vtkColorTransferFunction.newInstance();
+              context.current.lookupTables.set('connections', lut);
+              lut.addRGBPoint(0, ...state.connections.options.inColor);
+              lut.addRGBPoint(1, ...state.connections.options.outColor);
+
+              // Configure mapper
+              connectionsMapper.setScalarVisibility(true);
+              connectionsMapper.setScalarModeToUseCellData();
+              connectionsMapper.setColorModeToMapScalars();
+              connectionsMapper.setLookupTable(lut);
+              connectionsMapper.setScalarRange(0, 1);
+
+              // Configure actor
+              actor.getProperty().setOpacity(state.connections.options.opacity);
+              actor.getProperty().setRepresentationToSurface();
+              actor.getProperty().setLighting(true);
+              actor.getProperty().setInterpolationToPhong();
+              actor.getProperty().setAmbient(0.1);
+              actor.getProperty().setDiffuse(0.7);
+              actor.getProperty().setSpecular(0.3);
+              actor.getProperty().setSpecularPower(20);
+
+              // Add to renderer
+              context.current.renderer.addActor(actor);
+              context.current.renderWindow.render();
+
+              setLoadingStates(prev => ({ ...prev, connections: false }));
+            } catch (error) {
+              console.error('Error loading connections:', error);
+              setLoadingStates(prev => ({ ...prev, connections: false }));
+            }
+          } else {
+            // Just update visibility without reloading
+            const actor = context.current.actors.get('connections');
+            if (actor) {
+              actor.setVisibility(true);
+              context.current.renderWindow.render();
+            }
+          }
+        } else {
+          // Hide connections
+          const actor = context.current.actors.get('connections');
+          if (actor) {
+            actor.setVisibility(false);
+            context.current.renderWindow.render();
+          }
         }
 
         // Handle camera
@@ -314,8 +499,15 @@ const VTPViewer = () => {
 
         setLoadingProgress(100);
         context.current.renderWindow.render();
+
+        // Only set loading state if we actually loaded something
+        setIsLoading(isLoadingAnything);
+
+        // Store the current timestep
+        context.current.lastTimestep = state.currentTimestep;
       } catch (error) {
         console.error('Error loading VTP files:', error);
+        setLoadingStates({ neurons: false, connections: false });
       } finally {
         if (!isCancelled) {
           setIsLoading(false);
@@ -324,13 +516,24 @@ const VTPViewer = () => {
       }
     };
 
-    const timeoutId = setTimeout(loadData, 100); // Add small delay to debounce rapid changes
+    const timeoutId = setTimeout(loadData, 100);
 
     return () => {
       isCancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [isInitialized, state.neurons.fileUrl, state.connections.fileUrl, cleanupVTKObjects, saveCameraState, restoreCameraState]);
+  }, [
+    isInitialized, 
+    state.neurons.fileUrl, 
+    state.connections.fileUrl,
+    state.simulationType,
+    state.visualizationMode,
+    state.currentTimestep,
+    state.connections.options,
+    cleanupVTKObjects, 
+    saveCameraState, 
+    restoreCameraState
+  ]);
 
   // Update properties with debouncing
   useEffect(() => {
@@ -802,21 +1005,228 @@ const VTPViewer = () => {
     loadBrodmannInfo();
   }, []);
 
+  // Add this effect to load calcium data
+  useEffect(() => {
+    const loadCalciumData = async () => {
+      if (state.simulationType !== SIMULATION_TYPES.CALCIUM) return;
+      
+      try {
+        const response = await fetch('http://localhost:5000/files/calcium/calcium_data.json');
+        const data = await response.json();
+        console.log('Calcium data timesteps:', {
+          first: data.timesteps[0],
+          last: data.timesteps[data.timesteps.length - 1],
+          count: data.timesteps.length,
+          step: data.timesteps[1] - data.timesteps[0]
+        });
+        setCalciumData(data);
+      } catch (error) {
+        console.error('Error loading calcium data:', error);
+      }
+    };
+
+    loadCalciumData();
+  }, [state.simulationType]);
+
+  // Replace the existing calcium visualization effect with this new version
+  useEffect(() => {
+    const updateCalciumVisualization = async () => {
+      if (!isInitialized || 
+          !calciumData || 
+          state.simulationType !== SIMULATION_TYPES.CALCIUM ||
+          !calciumViz) {
+        return;
+      }
+
+      const neuronsReader = context.current.readers.get('neurons');
+      const neuronsMapper = context.current.mappers.get('neurons');
+      if (!neuronsReader || !neuronsMapper) {
+        console.warn('Required VTK objects not available');
+        return;
+      }
+
+      try {
+        console.log('Updating calcium visualization...'); // Debug log
+
+        // Load and process area mapping
+        const areaMapping = new Map();
+        const response = await fetch('http://localhost:5000/files/info/area-info.txt');
+        const text = await response.text();
+        
+        text.split('\n').forEach(line => {
+          if (!line.startsWith('#') && line.trim()) {
+            const [id, , , , area] = line.trim().split(/\s+/);
+            if (area?.startsWith('area_')) {
+              areaMapping.set(parseInt(id), area);
+            }
+          }
+        });
+
+        // Set up VTK data structures
+        const polyData = neuronsReader.getOutputData(0);
+        const points = polyData.getPoints();
+        const numPoints = points.getNumberOfPoints();
+
+        console.log('Processing calcium differences for points:', numPoints); // Debug log
+
+        // Create array for calcium differences
+        const calciumDiffs = new Float32Array(numPoints);
+
+        // Calculate differences for each neuron
+        let maxDiff = 0;
+        for (let i = 0; i < numPoints; i++) {
+          const neuronId = i + 1;
+          const areaId = areaMapping.get(neuronId);
+          const areaInfo = calciumViz.areaData.get(areaId);
+          
+          const diff = areaInfo?.difference ?? 0;
+          calciumDiffs[i] = diff;
+          maxDiff = Math.max(maxDiff, diff);
+        }
+
+        console.log('Max calcium difference:', maxDiff); // Debug log
+
+        // Create and configure VTK scalar array
+        const calciumArray = vtk({
+          vtkClass: 'vtkDataArray',
+          name: 'calcium_differences',
+          numberOfComponents: 1,
+          values: calciumDiffs
+        });
+
+        // Update polydata with new scalars
+        polyData.getPointData().setScalars(calciumArray);
+
+        // Create and configure color mapping
+        const lut = vtkColorTransferFunction.newInstance();
+        context.current.lookupTables.set('calcium', lut);
+
+        // Configure color transfer function
+        lut.addRGBPoint(0.0, 0.0, 1.0, 0.0);  // Green for no difference
+        lut.addRGBPoint(0.2, 1.0, 1.0, 0.0);  // Yellow for small difference
+        lut.addRGBPoint(0.5, 1.0, 0.0, 0.0);  // Red for large difference
+
+        // Configure mapper
+        neuronsMapper.setInputData(polyData);
+        neuronsMapper.setScalarVisibility(true);
+        neuronsMapper.setLookupTable(lut);
+        neuronsMapper.setScalarRange(0, Math.max(0.5, maxDiff));
+        neuronsMapper.setScalarModeToUsePointData();
+        neuronsMapper.setColorModeToMapScalars();
+
+        // Configure actor properties
+        const actor = context.current.actors.get('neurons');
+        if (actor) {
+          const property = actor.getProperty();
+          property.setAmbient(0.3);
+          property.setDiffuse(0.7);
+          property.setColor(1.0, 1.0, 1.0);
+        }
+
+        // Trigger updates
+        polyData.modified();
+        neuronsMapper.modified();
+        context.current.renderWindow.render();
+
+      } catch (error) {
+        console.error('Error updating calcium visualization:', error);
+      }
+    };
+
+    updateCalciumVisualization();
+  }, [isInitialized, calciumData, state.simulationType, state.currentTimestep, calciumViz]);
+
+  // Update the simulation type effect
+  useEffect(() => {
+    if (!isInitialized || !context.current.mappers) return;
+    
+    const neuronsMapper = context.current.mappers.get('neurons');
+    if (!neuronsMapper) return;
+
+    if (state.simulationType === SIMULATION_TYPES.CALCIUM) {
+      console.log('Switching to calcium visualization mode');
+      // Don't reset anything - let calcium visualization take over
+    } else {
+      console.log('Resetting to default visualization mode');
+      const actor = context.current.actors.get('neurons');
+      if (actor) {
+        actor.getProperty().setColor(1, 1, 1);
+      }
+      
+      // Clear any existing lookup tables
+      context.current.lookupTables.forEach(lut => lut.delete());
+      context.current.lookupTables.clear();
+      
+      neuronsMapper.setLookupTable(null);
+      neuronsMapper.setScalarVisibility(false);
+      neuronsMapper.modified();
+      context.current.renderWindow.render();
+    }
+  }, [isInitialized, state.simulationType]);
+
+  // Add this new effect after your other useEffects
+  useEffect(() => {
+    if (!isInitialized || !context.current.actors) return;
+
+    console.log('Visualization mode changed:', {
+      mode: state.visualizationMode,
+      loadConnections: state.loadConnections,
+      hasNeurons: context.current.actors.has('neurons'),
+      hasConnections: context.current.actors.has('connections')
+    });
+
+    const neuronsActor = context.current.actors.get('neurons');
+    const connectionsActor = context.current.actors.get('connections');
+
+    if (neuronsActor) {
+      const shouldShowNeurons = state.visualizationMode !== VISUALIZATION_MODES.CONNECTIONS_ONLY;
+      console.log('Setting neurons visibility:', shouldShowNeurons);
+      neuronsActor.setVisibility(shouldShowNeurons);
+    }
+
+    if (connectionsActor) {
+      const shouldShowConnections = state.visualizationMode !== VISUALIZATION_MODES.NEURONS_ONLY;
+      console.log('Setting connections visibility:', shouldShowConnections);
+      connectionsActor.setVisibility(shouldShowConnections);
+    }
+
+    if (context.current.renderWindow) {
+      context.current.renderWindow.render();
+    }
+  }, [isInitialized, state.visualizationMode]);
+
+  // Add this effect to handle simulation type changes
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    // Reset state when simulation type changes
+    setLoadingProgress(0);
+    setLoadingStates({
+      neurons: false,
+      connections: false
+    });
+    
+    // Force cleanup of existing objects
+    cleanupVTKObjects();
+    
+    // Reset camera on simulation change
+    if (context.current.renderer) {
+      context.current.renderer.resetCamera();
+      context.current.renderWindow?.render();
+    }
+    
+  }, [state.simulationType, isInitialized, cleanupVTKObjects]);
+
   return (
     <ViewerContainer>
       <VTKContainer ref={vtkContainerRef} sx={{ visibility: isInitialized ? 'visible' : 'hidden' }} />
-      <Button
+      <ToggleButton
         variant="contained"
         onClick={() => setShowLabels(!showLabels)}
-        sx={{
-          position: 'absolute',
-          top: '10px',
-          left: '10px',
-          zIndex: 1,
-        }}
+        active={showLabels ? 1 : 0}
       >
         {showLabels ? 'Hide Labels' : 'Show Labels'}
-      </Button>
+      </ToggleButton>
       <Box sx={{ position: 'absolute', top: '10px', right: '10px', zIndex: 1 }}>
         <Button variant="contained" onClick={() => setCameraPosition('front')} sx={{ m: 1 }}>
           Front View
@@ -836,7 +1246,7 @@ const VTPViewer = () => {
           Timestep: {state.currentTimestep.toLocaleString()}
         </StyledTypography>
       </InfoOverlay>
-      {isLoading && (
+      {(isLoading || loadingStates.neurons || loadingStates.connections) && (
         <LoadingOverlay>
           <CircularProgress 
             variant="determinate" 
@@ -849,7 +1259,37 @@ const VTPViewer = () => {
           </Typography>
         </LoadingOverlay>
       )}
-      <Tooltip info={tooltipInfo} />
+      {showLabels && <Tooltip info={tooltipInfo} />}
+      {state.simulationType === SIMULATION_TYPES.CALCIUM && calciumData && (
+        <ColorLegend sx={{ backgroundColor: 'transparent' }}>
+          <Typography variant="subtitle2" sx={{ color: 'white', mb: 1 }}>
+            Calcium Level Difference
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ 
+              width: '180px',
+              height: '20px',
+              background: 'linear-gradient(90deg, #00FF00, #FFFF00, #FF0000)',
+              borderRadius: '2px',
+              mb: 0.5
+            }} />
+            <Box sx={{ 
+              display: 'flex', 
+              justifyContent: 'space-between',
+              width: '180px',
+              color: 'white',
+              fontSize: '0.75rem'
+            }}>
+              <span>0%</span>
+              <span>50%</span>
+              <span>100%</span>
+            </Box>
+            <Typography variant="caption" sx={{ color: 'white', mt: 1, textAlign: 'center' }}>
+              Difference from target calcium level
+            </Typography>
+          </Box>
+        </ColorLegend>
+      )}
     </ViewerContainer>
   );
 };

@@ -16,6 +16,7 @@ import SimulationControls from './components/SimulationControls';
 import { useVTKState } from './context/VTKContext';
 import { theme } from './theme';
 import NeuronAnalytics from './components/NeuronAnalytics';
+import { Icon } from '@iconify/react';
 
 const MainContainer = styled(Box)(({ theme }) => ({
   minHeight: '100vh',
@@ -99,7 +100,7 @@ function App() {
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
             }}>
-              Brain Visualisation
+              Brain Visualisation <Icon icon="mdi:brain" style={{ fontSize: '1.5em', verticalAlign: 'middle', WebkitTextFillColor: 'transparent', color: '#81ECEC', WebkitBackgroundClip: 'text' }} />
             </Typography>
           </StyledToolbar>
         </StyledAppBar>

@@ -87,8 +87,8 @@ def extract_neuron_properties(data_dir, target_step, neuron_area_map):
             'Connected Axons': row['connected_axons'],
             'Grown Dendrites': row['grown_dendrites'],
             'Connected Dendrites': row['connected_dendrites'],
-            'Total Growth': float(row['grown_axons']) + float(row['grown_dendrites']),
-            'Total Connections': float(row['connected_axons']) + float(row['connected_dendrites'])
+            'Total Growth': row['grown_axons'] + row['grown_dendrites'],
+            'Total Connections': row['connected_axons'] + row['connected_dendrites']
         })
 
     if not records:
@@ -277,7 +277,7 @@ def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
 # Main execution
 data_dir = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network/monitors'
 positions_file = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network/positions/rank_0_positions.txt'
-target_step = 700  # Change to your desired global step
+target_step = 1000  # Change to your desired global step
 
 # Parse positions file to create neuron-to-area mapping
 neuron_area_map = parse_positions_file(positions_file)
@@ -285,5 +285,5 @@ neuron_area_map = parse_positions_file(positions_file)
 # Extract neuron properties as a DataFrame
 neuron_df = extract_neuron_properties(data_dir, target_step, neuron_area_map)
 
-plot_combined_parallel_and_box(neuron_df, target_step)
+plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots")
 

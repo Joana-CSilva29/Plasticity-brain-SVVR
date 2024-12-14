@@ -10,6 +10,12 @@ export const SIMULATION_TYPES = {
   STIMULUS: 'stimulus'
 };
 
+export const VISUALIZATION_MODES = {
+  NEURONS_ONLY: 'neurons-only',
+  CONNECTIONS_ONLY: 'connections-only',
+  BOTH: 'both'
+};
+
 const initialState = {
   neurons: {
     type: 'Neurons',
@@ -21,7 +27,7 @@ const initialState = {
   },
   connections: {
     type: 'Connections',
-    fileUrl: `http://localhost:5000/files/${SIMULATION_TYPES.NO_NETWORK}/connections_0000000.vtp`,
+    fileUrl: `http://localhost:5000/files/no-network/connections_0000000.vtp`,
     options: {
       opacity: 0.7,
       inColor: [46/255, 204/255, 113/255],
@@ -34,7 +40,9 @@ const initialState = {
   maxTimestep: 1000000,
   stepSize: 10000,
   simulationType: SIMULATION_TYPES.NO_NETWORK,
-  lastUpdate: Date.now()
+  lastUpdate: Date.now(),
+  loadConnections: true,
+  visualizationMode: VISUALIZATION_MODES.BOTH,
 };
 
 const THROTTLE_TIME = 16;
@@ -129,6 +137,23 @@ function vtkReducer(state, action) {
           ...state.connections,
           fileUrl: `http://localhost:5000/files/${action.payload}/connections_0000000.vtp`
         },
+        lastUpdate: currentTime
+      };
+
+    case 'SET_LOAD_CONNECTIONS':
+      return {
+        ...state,
+        loadConnections: action.payload,
+      };
+
+    case 'SET_VISUALIZATION_MODE':
+      if (state.visualizationMode === action.payload) {
+        return state;
+      }
+      return {
+        ...state,
+        visualizationMode: action.payload,
+        loadConnections: action.payload !== VISUALIZATION_MODES.NEURONS_ONLY,
         lastUpdate: currentTime
       };
 

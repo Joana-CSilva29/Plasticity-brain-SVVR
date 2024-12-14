@@ -15,9 +15,14 @@ export function useVTKActions() {
     dispatch({ type: 'SET_SELECTED_OBJECT', payload: objectType });
   };
 
+  const setVisualizationMode = (mode) => {
+    dispatch({ type: 'SET_VISUALIZATION_MODE', payload: mode });
+  };
+
   return {
     updateNeuronOptions,
     updateConnectionOptions,
-    setSelectedObject
+    setSelectedObject,
+    setVisualizationMode,
   };
 } 

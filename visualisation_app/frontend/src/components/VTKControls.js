@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Slider, Typography, Tabs, Tab } from '@mui/material';
 import { styled } from '@mui/material/styles';
-import { useVTKState } from '../context/VTKContext';
+import { useVTKState, useVTKDispatch } from '../context/VTKContext';
 import { useVTKActions } from '../hooks/useVTKActions';
 
 const SliderContainer = styled(Box)(({ theme }) => ({
@@ -31,10 +31,14 @@ const ColorControl = styled(Box)(({ theme }) => ({
 
 const VTKControls = ({ isLoading }) => {
   const state = useVTKState();
+  const dispatch = useVTKDispatch();
   const { updateNeuronOptions, updateConnectionOptions, setSelectedObject } = useVTKActions();
 
   const handleChange = (event, newValue) => {
     setSelectedObject(newValue);
+    if (newValue === 'connections') {
+      dispatch({ type: 'SET_LOAD_CONNECTIONS', payload: true });
+    }
   };
 
   const currentSource = state[state.selectedObject];
@@ -109,7 +113,7 @@ const VTKControls = ({ isLoading }) => {
           <SliderContainer>
             <Typography>Opacity</Typography>
             <Slider
-              value={currentSource.options.opacity}
+              value={currentSource.options.opacity} // Set default to 0
               onChange={(_, value) => handleUpdate('opacity', value)}
               min={0}
               max={1}
