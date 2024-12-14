@@ -1131,14 +1131,6 @@ const VTPViewer = () => {
         const areaId = areaMapping.get(neuronId);
         const areaInfo = calciumViz.areaData.get(areaId);
         
-        if (areaInfo) {
-          console.log(`Area ${areaId}:`, {
-            current: areaInfo.currentLevel,
-            target: areaInfo.targetLevel,
-            difference: calculateCalciumDifference(areaInfo.currentLevel, areaInfo.targetLevel)
-          });
-        }
-        
         const diff = areaInfo?.difference ?? 0;
         calciumDiffs[i] = diff;
         maxDiff = Math.max(maxDiff, diff);
@@ -1182,7 +1174,7 @@ const VTPViewer = () => {
         // Map point size based on calcium difference
         const baseSize = state.neurons.options.pointSize;
         const maxSizeMultiplier = 3; // Maximum size will be 3x the base size
-        const scaledSize = baseSize * (1 + (maxSizeMultiplier - 1) * (maxDiff > 0.5 ? 1 : maxDiff / 0.5));
+        const scaledSize = baseSize //* (1 + (maxSizeMultiplier - 1) * (maxDiff > 0.5 ? 1 : maxDiff / 0.5));
         property.setPointSize(scaledSize);
       }
 
@@ -1311,91 +1303,105 @@ const VTPViewer = () => {
     if (!isInitialized || !calciumViz || !context.current.renderer) return;
 
     try {
-      // Find area with highest difference
-      let maxDiff = 0;
-      let maxDiffAreaId = null;
-      calciumViz.areaData.forEach((data, areaId) => {
-        if (data.difference > maxDiff) {
-          maxDiff = data.difference;
-          maxDiffAreaId = areaId;
-        }
-      });
+      // Pre-calculate all the data we need before starting animation
+      const { maxDiffAreaId, targetPoint, center } = await (async () => {
+        // Find area with highest difference
+        let maxDiff = 0;
+        let maxDiffAreaId = null;
+        calciumViz.areaData.forEach((data, areaId) => {
+          if (data.difference > maxDiff) {
+            maxDiff = data.difference;
+            maxDiffAreaId = areaId;
+          }
+        });
 
-      if (!maxDiffAreaId) return;
+        if (!maxDiffAreaId) return null;
 
-      // Get the position of neurons in this area
-      const neuronsReader = context.current.readers.get('neurons');
-      const polyData = neuronsReader.getOutputData(0);
-      const points = polyData.getPoints();
-      const areaPoints = [];
+        // Get all the points data at once
+        const neuronsReader = context.current.readers.get('neurons');
+        const polyData = neuronsReader.getOutputData(0);
+        const points = polyData.getPoints();
+        const areaPoints = [];
 
-      // Load area mapping
-      const response = await fetch('http://localhost:5000/files/info/area-info.txt');
-      const text = await response.text();
-      const areaMapping = new Map();
-      
-      text.split('\n').forEach(line => {
-        if (!line.startsWith('#') && line.trim()) {
-          const [id, , , , area] = line.trim().split(/\s+/);
-          if (area?.startsWith('area_')) {
-            areaMapping.set(parseInt(id), area);
+        // Get the center of the brain
+        const bounds = polyData.getBounds();
+        const center = [
+          (bounds[0] + bounds[1]) / 2,
+          (bounds[2] + bounds[3]) / 2,
+          (bounds[4] + bounds[5]) / 2
+        ];
+
+        // Load area mapping once
+        const response = await fetch('http://localhost:5000/files/info/area-info.txt');
+        const text = await response.text();
+        const areaMapping = new Map();
+        
+        text.split('\n').forEach(line => {
+          if (!line.startsWith('#') && line.trim()) {
+            const [id, , , , area] = line.trim().split(/\s+/);
+            if (area?.startsWith('area_')) {
+              areaMapping.set(parseInt(id), area);
+            }
+          }
+        });
+
+        // Collect points for target area
+        for (let i = 0; i < points.getNumberOfPoints(); i++) {
+          const neuronId = i + 1;
+          const areaId = areaMapping.get(neuronId);
+          if (areaId === maxDiffAreaId) {
+            areaPoints.push(points.getPoint(i));
           }
         }
-      });
 
-      // Find points in target area
-      for (let i = 0; i < points.getNumberOfPoints(); i++) {
-        const neuronId = i + 1;
-        const areaId = areaMapping.get(neuronId);
-        if (areaId === maxDiffAreaId) {
-          areaPoints.push(points.getPoint(i));
-        }
-      }
+        if (areaPoints.length === 0) return null;
 
-      if (areaPoints.length === 0) return;
+        // Calculate target point (centroid of area)
+        const targetPoint = areaPoints.reduce(
+          (acc, point) => [
+            acc[0] + point[0], 
+            acc[1] + point[1], 
+            acc[2] + point[2]
+          ],
+          [0, 0, 0]
+        ).map(coord => coord / areaPoints.length);
 
-      // Calculate centroid
-      const centroid = areaPoints.reduce(
-        (acc, point) => [
-          acc[0] + point[0], 
-          acc[1] + point[1], 
-          acc[2] + point[2]
-        ],
-        [0, 0, 0]
-      ).map(coord => coord / areaPoints.length);
+        return { maxDiffAreaId, targetPoint, center };
+      })();
 
-      // Get camera and initial position
+      if (!targetPoint || !center) return;
+
+      // Get camera initial state
       const camera = context.current.renderer.getActiveCamera();
       const initialPosition = camera.getPosition();
       const initialFocalPoint = camera.getFocalPoint();
-      const initialViewUp = camera.getViewUp();
-
-      // Store initial clipping range
-      const initialClippingRange = camera.getClippingRange();
-
-      // Calculate target camera position
       const distance = camera.getDistance();
+
+      // Calculate direction from center to target point
       const direction = [
-        centroid[0] - initialFocalPoint[0],
-        centroid[1] - initialFocalPoint[1],
-        centroid[2] - initialFocalPoint[2]
+        targetPoint[0] - center[0],
+        targetPoint[1] - center[1],
+        targetPoint[2] - center[2]
       ];
       const length = Math.sqrt(direction[0]**2 + direction[1]**2 + direction[2]**2);
+
+      // Calculate target camera position
       const targetPosition = [
-        centroid[0] + (direction[0] / length) * distance,
-        centroid[1] + (direction[1] / length) * distance,
-        centroid[2] + (direction[2] / length) * distance
+        center[0] + (direction[0] / length) * distance,
+        center[1] + (direction[1] / length) * distance,
+        center[2] + (direction[2] / length) * distance
       ];
 
-      // Animate camera movement
+      // Animation setup
       const animationDuration = 2000;
       const startTime = Date.now();
+      let animationFrameId;
 
       const animate = () => {
         const now = Date.now();
         const elapsed = now - startTime;
         const t = Math.min(elapsed / animationDuration, 1);
-        
+
         const easeT = t < 0.5 
           ? 4 * t * t * t 
           : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -1407,27 +1413,25 @@ const VTPViewer = () => {
           initialPosition[2] + (targetPosition[2] - initialPosition[2]) * easeT
         ];
 
-        // Interpolate focal point
-        const newFocalPoint = [
-          initialFocalPoint[0] + (centroid[0] - initialFocalPoint[0]) * easeT,
-          initialFocalPoint[1] + (centroid[1] - initialFocalPoint[1]) * easeT,
-          initialFocalPoint[2] + (centroid[2] - initialFocalPoint[2]) * easeT
-        ];
-
         camera.setPosition(...newPosition);
-        camera.setFocalPoint(...newFocalPoint);
-        
-        // Reset clipping range to ensure all objects are visible
+        camera.setFocalPoint(...center);  // Use the center from closure
         context.current.renderer.resetCameraClippingRange();
-
         context.current.renderWindow.render();
 
         if (t < 1) {
-          requestAnimationFrame(animate);
+          animationFrameId = requestAnimationFrame(animate);
         }
       };
 
-      animate();
+      // Start animation
+      animationFrameId = requestAnimationFrame(animate);
+
+      // Cleanup function
+      return () => {
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+        }
+      };
 
     } catch (error) {
       console.error('Error focusing on highest difference:', error);
