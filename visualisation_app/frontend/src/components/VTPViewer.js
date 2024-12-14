@@ -154,6 +154,15 @@ const useCalciumVisualization = (calciumData, currentTimestep) => {
   }, [calciumData, currentTimestep]);
 };
 
+const hexToRgb = (hex) => {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16)
+  } : null;
+};
+
 const VTPViewer = () => {
   const state = useVTKState();
   const vtkContainerRef = useRef(null);
@@ -269,6 +278,19 @@ const VTPViewer = () => {
       actor: axesActor,
       interactor: fullScreenRenderer.getInteractor(),
     });
+
+    // Set the color of the axes to match theme
+    const themeColor = theme.palette.primary.main;
+    const rgbColor = hexToRgb(themeColor);
+    if (rgbColor) {
+      const normalizedColor = [rgbColor.r / 255, rgbColor.g / 255, rgbColor.b / 255];
+      
+      // Set colors for the axes
+      axesActor.setXAxisColor(...normalizedColor);
+      axesActor.setYAxisColor(...normalizedColor);
+      axesActor.setZAxisColor(...normalizedColor);
+    }
+
     orientationWidget.setEnabled(true);
     orientationWidget.setViewportCorner(
       vtkOrientationMarkerWidget.Corners.BOTTOM_RIGHT
@@ -302,7 +324,7 @@ const VTPViewer = () => {
       }
       cleanupVTKObjects();
     };
-  }, [containerReady, cleanupVTKObjects]);
+  }, [containerReady, cleanupVTKObjects, theme.palette.primary.main]);
 
   // Load data with debouncing
   useEffect(() => {
@@ -552,6 +574,11 @@ const VTPViewer = () => {
         // Only update point size directly if not in calcium mode
         if (state.simulationType !== SIMULATION_TYPES.CALCIUM) {
           property.setPointSize(state.neurons.options.pointSize);
+          // Ensure we maintain color visibility
+          const neuronsMapper = context.current.mappers.get('neurons');
+          if (neuronsMapper) {
+            neuronsMapper.setScalarVisibility(true);
+          }
         }
         property.setOpacity(state.neurons.options.opacity);
       }
@@ -1527,6 +1554,16 @@ const VTPViewer = () => {
               Difference from target calcium level
             </Typography>
           </Box>
+        </ColorLegend>
+      )}
+      {state.simulationType === SIMULATION_TYPES.NO_NETWORK && (
+        <ColorLegend sx={{ backgroundColor: 'transparent' }}>
+          <Typography variant="subtitle2" sx={{ color: 'white', mb: 1 }}>
+            Area Visualization
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'white', textAlign: 'center' }}>
+            Each color represents a different Brodmann area
+          </Typography>
         </ColorLegend>
       )}
     </ViewerContainer>

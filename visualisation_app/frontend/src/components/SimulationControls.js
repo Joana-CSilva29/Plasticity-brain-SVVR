@@ -151,8 +151,8 @@ const SimulationControls = () => {
         variant="outlined"
       >
         <MenuItem value={SIMULATION_TYPES.NO_NETWORK}>No Network</MenuItem>
-        <MenuItem value={SIMULATION_TYPES.DISABLE}>Disable</MenuItem>
         <MenuItem value={SIMULATION_TYPES.CALCIUM}>Calcium</MenuItem>
+        <MenuItem value={SIMULATION_TYPES.DISABLE}>Disable</MenuItem>
         <MenuItem value={SIMULATION_TYPES.STIMULUS}>Stimulus</MenuItem>
       </StyledSelect>
 
