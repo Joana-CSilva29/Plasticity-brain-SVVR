@@ -113,6 +113,7 @@ const calculateCalciumDifference = (currentLevel, targetLevel) => {
   if (typeof currentLevel !== 'number' || typeof targetLevel !== 'number') {
     return 0;
   }
+  // Calculate relative difference as a percentage (0-1 scale)
   return Math.abs(currentLevel - targetLevel) / targetLevel;
 };
 
@@ -134,8 +135,10 @@ const useCalciumVisualization = (calciumData, currentTimestep) => {
       const targetLevel = data.target_calcium;
       
       if (typeof currentLevel === 'number' && typeof targetLevel === 'number') {
+        const difference = calculateCalciumDifference(currentLevel, targetLevel);
+        console.log(`Area ${areaId}:`, { currentLevel, targetLevel, difference });
         areaData.set(areaId, {
-          difference: calculateCalciumDifference(currentLevel, targetLevel),
+          difference,
           currentLevel,
           targetLevel,
           neuronCount: data.neuron_count
@@ -746,58 +749,68 @@ const VTPViewer = () => {
 
         // Create the callback to render labels
         psMapper.setCallback((coordsList, camera, aspect, depthBuffer) => {
-          if (!labelContext.current || !labelCanvas.current) return;
+            if (!labelCanvas.current || !labelContext.current) return;
 
-          const ctx = labelContext.current;
-          const canvas = labelCanvas.current;
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const ctx = labelContext.current;
+            const canvasWidth = labelCanvas.current.width;
+            const canvasHeight = labelCanvas.current.height;
 
-          // Get current canvas dimensions
-          const canvasWidth = canvas.width;
-          const canvasHeight = canvas.height;
+            // Clear previous labels
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-          coordsList.forEach((xy, idx) => {
-            const { label, color, centroid } = labelPoints[idx];
+            // Reset label positions
+            labelPositions.current.clear();
 
-            // Calculate relative positions (0 to 1) from the center
-            const relX = (xy[0] / canvasWidth) - 0.5;
-            const relY = (xy[1] / canvasHeight) - 0.5;
+            coordsList.forEach((xy, idx) => {
+                const { label, color, centroid } = labelPoints[idx];
 
-            // Apply scaling and offset to relative positions
-            const scale = 0.6;
-            const xOffset = -0.30;
-            const yOffset = -0.32;
+                // Calculate relative positions (0 to 1) from the center
+                const relX = (xy[0] / canvasWidth) - 0.5;
+                const relY = (xy[1] / canvasHeight) - 0.5;
 
-            // Convert back to pixel coordinates
-            const x = (relX * scale + 0.5 + xOffset) * canvasWidth;
-            const y = canvasHeight - ((relY * scale + 0.5 + yOffset) * canvasHeight);
+                // Apply scaling and offset to relative positions
+                const scale = 0.6;
+                const xOffset = -0.30;
+                const yOffset = -0.32;
 
-            // Format label
-            const areaNumber = label.split('_')[1];
-            const brodmannLabel = `BA ${areaNumber}`;
+                // Convert back to pixel coordinates
+                const x = (relX * scale + 0.5 + xOffset) * canvasWidth;
+                const y = canvasHeight - ((relY * scale + 0.5 + yOffset) * canvasHeight);
 
-            // Draw shadow/outline
-            ctx.font = 'bold 14px Arial';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-            ctx.lineWidth = 3;
-            ctx.strokeText(brodmannLabel, x, y);
+                // Format label
+                const areaNumber = label.split('_')[1];
+                const brodmannLabel = `BA ${areaNumber}`;
 
-            // Draw text
-            ctx.fillStyle = `rgb(${Math.round(color[0])}, ${Math.round(color[1])}, ${Math.round(color[2])})`;
-            ctx.fillText(brodmannLabel, x, y);
+                // Draw shadow/outline
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.lineWidth = 3;
+                ctx.strokeText(brodmannLabel, x, y);
 
-            // Store label position with the full label ID
-            labelPositions.current.set(`${x},${y}`, {
-              label: label,  // Make sure this is the full BA_XX format
-              brodmannArea: brodmannLabel,
-              color,
-              bounds: centroid
+                // Always use white text for calcium mode
+                ctx.fillStyle = state.simulationType === SIMULATION_TYPES.CALCIUM 
+                    ? 'rgb(255, 255, 255)' 
+                    : `rgb(${Math.round(color[0] * 255)}, ${Math.round(color[1] * 255)}, ${Math.round(color[2] * 255)})`;
+                ctx.fillText(brodmannLabel, x, y);
+
+                // Store label position with the full label ID
+                labelPositions.current.set(`${x},${y}`, {
+                    label: label,  // The full area_XX format
+                    brodmannArea: brodmannLabel,
+                    color,
+                    bounds: centroid,
+                    // Add calcium difference if in calcium mode
+                    ...(state.simulationType === SIMULATION_TYPES.CALCIUM && {
+                        calciumDiff: calciumViz?.areaData.get(label)?.difference,
+                        currentLevel: calciumViz?.areaData.get(label)?.currentLevel,
+                        targetLevel: calciumViz?.areaData.get(label)?.targetLevel
+                    })
+                });
+                
+                console.log('Stored label position for:', label); // Add this log
             });
-            
-            console.log('Stored label position for:', label); // Add this log
-          });
         });
 
         // Add actor to renderer
@@ -807,7 +820,7 @@ const VTPViewer = () => {
     } catch (error) {
         console.error('Error creating labels:', error);
     }
-  }, [labelActor]);
+  }, [state.simulationType]);
 
   // Add this effect to handle label visibility
   useEffect(() => {
@@ -909,26 +922,80 @@ const VTPViewer = () => {
     right: { position: [0, -100, 0], up: [0, 0, 1] }    // Switched with front view
   };
 
-  // Add a function to change camera position
+  // Update the setCameraPosition function
   const setCameraPosition = (preset) => {
     if (!context.current.renderer) return;
     
     const camera = context.current.renderer.getActiveCamera();
-    const pos = cameraPresets[preset].position;
-    const up = cameraPresets[preset].up;
-    
-    camera.setPosition(...pos);
-    camera.setFocalPoint(0, 0, 0);
-    camera.setViewUp(...up);
-    context.current.renderer.resetCamera();
-    context.current.renderWindow.render();
+    const initialPosition = camera.getPosition();
+    const initialFocalPoint = camera.getFocalPoint();
+    const initialViewUp = camera.getViewUp();
+    const distance = camera.getDistance();
+
+    // Get the center of the brain (center of all points)
+    const neuronsReader = context.current.readers.get('neurons');
+    const polyData = neuronsReader.getOutputData(0);
+    const bounds = polyData.getBounds();
+    const center = [
+      (bounds[0] + bounds[1]) / 2,
+      (bounds[2] + bounds[3]) / 2,
+      (bounds[4] + bounds[5]) / 2
+    ];
+
+    // Calculate target position based on preset while maintaining distance
+    const targetPosition = cameraPresets[preset].position.map(coord => coord * distance / 100);
+    const targetViewUp = cameraPresets[preset].up;
+
+    // Animate camera movement
+    const animationDuration = 2000;
+    const startTime = Date.now();
+
+    const animate = () => {
+      const now = Date.now();
+      const elapsed = now - startTime;
+      const t = Math.min(elapsed / animationDuration, 1);
+      
+      const easeT = t < 0.5 
+        ? 4 * t * t * t 
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+      // Interpolate position
+      const newPosition = [
+        initialPosition[0] + (targetPosition[0] - initialPosition[0]) * easeT,
+        initialPosition[1] + (targetPosition[1] - initialPosition[1]) * easeT,
+        initialPosition[2] + (targetPosition[2] - initialPosition[2]) * easeT
+      ];
+
+      // Interpolate view up vector
+      const newViewUp = [
+        initialViewUp[0] + (targetViewUp[0] - initialViewUp[0]) * easeT,
+        initialViewUp[1] + (targetViewUp[1] - initialViewUp[1]) * easeT,
+        initialViewUp[2] + (targetViewUp[2] - initialViewUp[2]) * easeT
+      ];
+
+      camera.setPosition(...newPosition);
+      camera.setViewUp(...newViewUp);
+      
+      // Keep the focal point at the center of the brain
+      camera.setFocalPoint(...center);
+      
+      // Reset clipping range to ensure all objects are visible
+      context.current.renderer.resetCameraClippingRange();
+      context.current.renderWindow.render();
+
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+
+    animate();
   };
 
   // Add this function to handle mouse movement
   const handleMouseMove = useCallback((event) => {
     if (!labelCanvas.current || !showLabels) {
-      setTooltipInfo(null);
-      return;
+        setTooltipInfo(null);
+        return;
     }
 
     const rect = labelCanvas.current.getBoundingClientRect();
@@ -937,31 +1004,41 @@ const VTPViewer = () => {
 
     let foundLabel = false;
     labelPositions.current.forEach((labelInfo, pos) => {
-      const [labelX, labelY] = pos.split(',').map(Number);
-      const distance = Math.sqrt(
-        Math.pow(x - labelX, 2) + 
-        Math.pow(y - labelY, 2)
-      );
+        const [labelX, labelY] = pos.split(',').map(Number);
+        const distance = Math.sqrt(
+            Math.pow(x - labelX, 2) + 
+            Math.pow(y - labelY, 2)
+        );
 
-      if (distance < 20) {
-        foundLabel = true;
-        const areaId = labelInfo.label.replace('area_', 'BA_');
-        const areaInfo = brodmannInfo.get(areaId);
-        
-        if (areaInfo) {
-          setTooltipInfo({
-            ...labelInfo,
-            name: areaInfo.name,
-            description: areaInfo.description
-          });
+        if (distance < 20) {
+            foundLabel = true;
+            const areaId = labelInfo.label;  // Use the original area_XX format
+            const brodmannId = areaId.replace('area_', 'BA_');
+            const areaInfo = brodmannInfo.get(brodmannId);
+            
+            if (areaInfo) {
+                const areaData = calciumViz?.areaData.get(areaId);
+                setTooltipInfo({
+                    ...labelInfo,
+                    name: areaInfo.name,
+                    description: areaInfo.description,
+                    ...(state.simulationType === SIMULATION_TYPES.CALCIUM && {
+                        calciumDiff: areaData 
+                            ? `Calcium difference from target: ${(areaData.difference * 100).toFixed(4)}%`
+                            : 'No calcium data available, data infered from surrounding areas.',
+                        ...(areaData && {
+                            details: `Current: ${areaData.currentLevel.toFixed(4)}, Target: ${areaData.targetLevel.toFixed(4)}`
+                        })
+                    })
+                });
+            }
         }
-      }
     });
 
     if (!foundLabel) {
-      setTooltipInfo(null);
+        setTooltipInfo(null);
     }
-  }, [showLabels, brodmannInfo]);
+  }, [showLabels, brodmannInfo, state.simulationType, calciumViz]);
 
   // Add this effect to handle mouse movement
   useEffect(() => {
@@ -1053,6 +1130,14 @@ const VTPViewer = () => {
         const neuronId = i + 1;
         const areaId = areaMapping.get(neuronId);
         const areaInfo = calciumViz.areaData.get(areaId);
+        
+        if (areaInfo) {
+          console.log(`Area ${areaId}:`, {
+            current: areaInfo.currentLevel,
+            target: areaInfo.targetLevel,
+            difference: calculateCalciumDifference(areaInfo.currentLevel, areaInfo.targetLevel)
+          });
+        }
         
         const diff = areaInfo?.difference ?? 0;
         calciumDiffs[i] = diff;
