@@ -1,0 +1,42 @@
+BA_1|Primary Somatosensory Cortex|Responsible for processing touch and proprioception
+BA_2|Primary Somatosensory Cortex|Processes temperature, light touch, pressure and pain
+BA_3|Primary Somatosensory Cortex|Main area for processing sensory input from the body
+BA_4|Primary Motor Cortex|Controls voluntary movements
+BA_5|Somatosensory Association Cortex|Integrates different types of sensory information
+BA_6|Premotor and Supplementary Motor Cortex|Plans and coordinates complex movements
+BA_7|Somatosensory Association Cortex|Processes visual and motor information
+BA_8|Frontal Eye Fields|Controls eye movements
+BA_9|Dorsolateral Prefrontal Cortex|Executive function, working memory
+BA_10|Anterior Prefrontal Cortex|Complex cognitive behavior, planning
+BA_11|Orbitofrontal Area|Decision making, emotional responses
+BA_17|Primary Visual Cortex|Processes basic visual information
+BA_18|Secondary Visual Cortex|More complex visual processing
+BA_19|Associative Visual Cortex|Complex visual processing
+BA_20|Inferior Temporal Gyrus|High-level visual processing, memory
+BA_21|Middle Temporal Gyrus|Sound processing, language semantics
+BA_22|Superior Temporal Gyrus|Language comprehension
+BA_23|Ventral Posterior Cingulate|Emotion, memory, navigation
+BA_24|Ventral Anterior Cingulate|Emotion, error detection
+BA_25|Subgenual Area|Mood, emotional behavior
+BA_26|Ectosplenial Area|Memory, navigation
+BA_27|Piriform Cortex|Processes olfactory information
+BA_28|Posterior Entorhinal Cortex|Memory formation
+BA_29|Retrosplenial Cingulate Cortex|Memory, navigation
+BA_30|Agranular Retrolimbic Area|Memory, navigation
+BA_31|Dorsal Posterior Cingulate|Spatial memory, emotion
+BA_32|Dorsal Anterior Cingulate|Error detection, emotional regulation
+BA_33|Pregenual Area|Emotional processing
+BA_34|Anterior Entorhinal Cortex|Memory formation
+BA_35|Perirhinal Cortex|Memory formation and recall
+BA_36|Parahippocampal Cortex|Memory formation and recall
+BA_37|Fusiform Gyrus|Face and object recognition
+BA_38|Temporopolar Area|Memory, emotional processing
+BA_39|Angular Gyrus|Language, mathematics, spatial cognition
+BA_40|Supramarginal Gyrus|Language, spatial processing
+BA_41|Primary Auditory Cortex|Basic sound processing
+BA_42|Secondary Auditory Cortex|More complex sound processing
+BA_43|Subcentral Area|Taste processing
+BA_44|Broca's Area (Pars Opercularis)|Speech production
+BA_45|Broca's Area (Pars Triangularis)|Speech production
+BA_46|Dorsolateral Prefrontal Cortex|Working memory, attention
+BA_47|Inferior Prefrontal Gyrus|Processing syntax and inhibition
