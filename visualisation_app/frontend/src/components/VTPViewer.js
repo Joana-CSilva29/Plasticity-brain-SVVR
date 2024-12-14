@@ -9,6 +9,10 @@ import vtkPixelSpaceCallbackMapper from '@kitware/vtk.js/Rendering/Core/PixelSpa
 import vtk from '@kitware/vtk.js/vtk';
 import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget';
 import vtkAnnotatedCubeActor from '@kitware/vtk.js/Rendering/Core/AnnotatedCubeActor';
+import vtkTubeFilter from '@kitware/vtk.js/Filters/General/TubeFilter';
+import vtkSplineWidget from '@kitware/vtk.js/Widgets/Widgets3D/SplineWidget';
+import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
+import { splineKind } from '@kitware/vtk.js/Common/DataModel/Spline3D/Constants';
 import { styled, useTheme } from '@mui/material/styles';
 import { Box, Typography, CircularProgress, Button } from '@mui/material';
 import { useVTKState } from '../context/VTKContext';
@@ -482,6 +486,20 @@ const VTPViewer = () => {
                 throw new Error('Failed to read connections data');
               }
 
+              // Debug log the connection weights
+              const cellData = output.getCellData();
+              const weights = cellData.getArrayByName('ConnectionWeight');
+              let weightRange = [0, 1]; // Default range
+
+              if (weights) {
+                weightRange = weights.getRange();
+                console.log("\nConnection weights from VTP file:");
+                console.log("Weight range:", weightRange);
+                console.log("Number of weights:", weights.getNumberOfTuples());
+                console.log("First 10 weights:", Array.from({length: Math.min(10, weights.getNumberOfTuples())}, 
+                  (_, i) => weights.getTuple(i)[0]));
+              }
+
               console.log('Loaded connections data:', {
                 timestep: state.currentTimestep,
                 numberOfPoints: output.getNumberOfPoints(),
@@ -495,41 +513,61 @@ const VTPViewer = () => {
 
               setLoadingProgress(90);
 
+              // Create tube filter with adjusted parameters
+              const tubeFilter = vtkTubeFilter.newInstance();
+              tubeFilter.setInputData(output);
+              tubeFilter.setRadius(0.05);  // Base radius
+              tubeFilter.setNumberOfSides(20);
+              tubeFilter.setCapping(true);
+
+              // Important: Set the array to process BEFORE setting varyRadius
+              tubeFilter.setInputArrayToProcess(0,  // connection #
+                'ConnectionWeight',  // array name
+                'CellData',         // data type
+                'Scalars'           // attribute type - this was missing!
+              );
+
+              // Now set the vary radius mode
+              tubeFilter.setVaryRadius(1);  
+              tubeFilter.setRadiusFactor(50.0);  
+
               // Create mapper and actor
-              const connectionsMapper = vtkMapper.newInstance();
-              context.current.mappers.set('connections', connectionsMapper);
-              connectionsMapper.setInputData(output);
+              const mapper = vtkMapper.newInstance();
+              mapper.setInputConnection(tubeFilter.getOutputPort());
+
+              // Set up color mapping using the actual data range
+              const lut = vtkColorTransferFunction.newInstance();
+              lut.addRGBPoint(weightRange[0], 0.1, 0.1, 0.1);     // Very dark for minimum
+              lut.addRGBPoint(weightRange[0] + (weightRange[1] - weightRange[0]) * 0.3, 0.4, 0.4, 0.4);  // Medium
+              lut.addRGBPoint(weightRange[1], 1.0, 1.0, 1.0);     // Bright white for maximum
+
+              // Configure the mapper
+              mapper.setScalarVisibility(true);
+              mapper.setScalarModeToUseCellData();
+              mapper.setColorModeToMapScalars();
+              mapper.setInputArrayToProcess(0, 'ConnectionWeight', 'CellData', 'Scalars');
+              mapper.setLookupTable(lut);
+              mapper.setScalarRange(weightRange[0], weightRange[1]);
 
               const actor = vtkActor.newInstance();
-              context.current.actors.set('connections', actor);
-              actor.setMapper(connectionsMapper);
+              actor.setMapper(mapper);
 
-              // Set up color mapping
-              const lut = vtkColorTransferFunction.newInstance();
-              context.current.lookupTables.set('connections', lut);
-              lut.addRGBPoint(0, ...state.connections.options.inColor);
-              lut.addRGBPoint(1, ...state.connections.options.outColor);
-
-              // Configure mapper
-              connectionsMapper.setScalarVisibility(true);
-              connectionsMapper.setScalarModeToUseCellData();
-              connectionsMapper.setColorModeToMapScalars();
-              connectionsMapper.setLookupTable(lut);
-              connectionsMapper.setScalarRange(0, 1);
-
-              // Configure actor
-              actor.getProperty().setOpacity(state.connections.options.opacity);
-              actor.getProperty().setRepresentationToSurface();
-              actor.getProperty().setLighting(true);
-              actor.getProperty().setInterpolationToPhong();
-              actor.getProperty().setAmbient(0.1);
-              actor.getProperty().setDiffuse(0.7);
-              actor.getProperty().setSpecular(0.3);
-              actor.getProperty().setSpecularPower(20);
+              // Configure actor properties
+              const property = actor.getProperty();
+              property.setOpacity(0.8);
+              property.setAmbient(0.3);
+              property.setDiffuse(0.7);
+              property.setSpecular(0.3);
+              property.setSpecularPower(20);
 
               // Add to renderer
               context.current.renderer.addActor(actor);
+              context.current.actors.set('connections', actor);
               context.current.renderWindow.render();
+
+              // Store references for cleanup
+              context.current.mappers.set('connections', mapper);
+              context.current.lookupTables.set('connections', lut);
 
               setLoadingStates(prev => ({ ...prev, connections: false }));
             } catch (error) {

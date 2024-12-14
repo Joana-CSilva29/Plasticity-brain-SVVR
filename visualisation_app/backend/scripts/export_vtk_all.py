@@ -2,6 +2,7 @@ import vtk
 from collections import defaultdict
 import random
 import os
+import math
 
 
 def read_positions(file_path):
@@ -127,90 +128,69 @@ def create_neurons_polydata(points, point_areas, area_to_id, num_areas):
 
 
 def create_connections_polydata(area_centroids, in_connections, out_connections, point_areas):
-    """Create vtkPolyData for area-level connections with tubes and separate in/out colors."""
+    """Create basic vtkPolyData for area-level connections with weights."""
     points = vtk.vtkPoints()
     lines = vtk.vtkCellArray()
     
-    # Create array for connection types (0 for in, 1 for out)
-    connectionTypes = vtk.vtkUnsignedCharArray()
-    connectionTypes.SetName("ConnectionType")
-    connectionTypes.SetNumberOfComponents(1)
+    # Create array for connection weights
+    connectionWeights = vtk.vtkFloatArray()
+    connectionWeights.SetName("ConnectionWeight")
+    connectionWeights.SetNumberOfComponents(1)
     
     # Map area IDs to point indices
     area_id_to_point_id = {}
     for area_id, centroid in area_centroids.items():
         area_id_to_point_id[area_id] = points.InsertNextPoint(centroid)
 
-    # Create initial polydata with lines
+    # Count connections between areas
+    connection_counts = defaultdict(int)
+    
+    # Process connections as undirected (combine in and out)
+    all_connections = in_connections + out_connections
+    for source_id, target_id in all_connections:
+        if source_id >= len(point_areas) or target_id >= len(point_areas):
+            continue
+            
+        area1 = point_areas[source_id]
+        area2 = point_areas[target_id]
+        
+        # Create a sorted tuple to treat connections as undirected
+        area_pair = tuple(sorted([area1, area2]))
+        connection_counts[area_pair] += 1
+
+    # Find max connection count for normalization
+    max_count = max(connection_counts.values()) if connection_counts else 1
+
+    print("\nConnection counts between areas:")
+    for (area1, area2), count in connection_counts.items():
+        normalized = count / max_count
+        print(f"Areas {area1} <-> {area2}: {count} connections (normalized: {normalized:.3f})")
+    print(f"Maximum connections between any two areas: {max_count}")
+
+    # Create lines with explicit normalization
+    for (area1, area2), count in connection_counts.items():
+        if area1 == area2:
+            continue  # Skip self-connections
+            
+        line = vtk.vtkLine()
+        line.GetPointIds().SetId(0, area_id_to_point_id[area1])
+        line.GetPointIds().SetId(1, area_id_to_point_id[area2])
+        lines.InsertNextCell(line)
+        
+        # Ensure normalization is exactly between 0 and 1
+        normalized_weight = count / max_count
+        connectionWeights.InsertNextValue(normalized_weight)
+
+    # Create the polydata
     polydata = vtk.vtkPolyData()
     polydata.SetPoints(points)
-    
-    # Process in connections
-    for source_id, target_id in in_connections:
-        if source_id < len(point_areas) and target_id < len(point_areas):
-            area1 = point_areas[source_id]
-            area2 = point_areas[target_id]
-            
-            # Create line
-            line = vtk.vtkLine()
-            line.GetPointIds().SetId(0, area_id_to_point_id[area1])
-            line.GetPointIds().SetId(1, area_id_to_point_id[area2])
-            lines.InsertNextCell(line)
-            
-            # Mark as in connection (0)
-            connectionTypes.InsertNextValue(0)
-
-    # Process out connections
-    for source_id, target_id in out_connections:
-        if source_id < len(point_areas) and target_id < len(point_areas):
-            area1 = point_areas[source_id]
-            area2 = point_areas[target_id]
-            
-            # Create line
-            line = vtk.vtkLine()
-            line.GetPointIds().SetId(0, area_id_to_point_id[area1])
-            line.GetPointIds().SetId(1, area_id_to_point_id[area2])
-            lines.InsertNextCell(line)
-            
-            # Mark as out connection (1)
-            connectionTypes.InsertNextValue(1)
-
     polydata.SetLines(lines)
-    polydata.GetCellData().AddArray(connectionTypes)
-    polydata.GetCellData().SetActiveScalars('ConnectionType')
-
-    # Create tube filter
-    tubeFilter = vtk.vtkTubeFilter()
-    tubeFilter.SetInputData(polydata)
-    tubeFilter.SetRadius(0.05)
-    tubeFilter.SetNumberOfSides(6)
-    tubeFilter.SetCapping(False)
-    tubeFilter.SetVaryRadius(0)
-    tubeFilter.Update()
-
-    # Get the output and create a new array for the tube cells
-    output = tubeFilter.GetOutput()
-    tubeCellTypes = vtk.vtkUnsignedCharArray()
-    tubeCellTypes.SetName("ConnectionType")
-    tubeCellTypes.SetNumberOfComponents(1)
     
-    # Each line becomes multiple cells in the tube - need to replicate the scalar value
-    cellsPerLine = tubeFilter.GetNumberOfSides()  # Number of cells per tube segment
-    for i in range(connectionTypes.GetNumberOfTuples()):
-        value = connectionTypes.GetValue(i)
-        # Replicate the value for each cell in the tube
-        for _ in range(cellsPerLine):
-            tubeCellTypes.InsertNextValue(value)
+    # Add weights to cell data
+    polydata.GetCellData().AddArray(connectionWeights)
+    polydata.GetCellData().SetActiveScalars("ConnectionWeight")
     
-    output.GetCellData().SetScalars(tubeCellTypes)
-    
-    # Debug logs
-    print(f"Number of points: {output.GetNumberOfPoints()}")
-    print(f"Number of cells: {output.GetNumberOfCells()}")
-    print(f"Connection types array size: {tubeCellTypes.GetNumberOfTuples()}")
-    print(f"First few connection types: {[tubeCellTypes.GetValue(i) for i in range(min(5, tubeCellTypes.GetNumberOfTuples()))]}")
-    
-    return output
+    return polydata
 
 
 def export_to_vtp(polydata, filename):
