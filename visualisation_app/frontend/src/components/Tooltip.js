@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Paper, Typography } from '@mui/material';
 import { styled } from '@mui/material/styles';
+import { useTheme } from '@mui/material/styles';
 
 const TooltipContainer = styled(Paper)(({ theme }) => ({
   position: 'absolute',
@@ -22,11 +23,19 @@ const TooltipContainer = styled(Paper)(({ theme }) => ({
 }));
 
 const Tooltip = ({ info }) => {
+  const theme = useTheme();
+  
   if (!info) return null;
 
   return (
     <TooltipContainer>
-      <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+      <Typography 
+        variant="subtitle1" 
+        sx={{ 
+          fontWeight: 'bold',
+          color: theme.palette.primary.main  // Use theme color for title
+        }}
+      >
         {info.brodmannArea}
       </Typography>
       {info.name && (

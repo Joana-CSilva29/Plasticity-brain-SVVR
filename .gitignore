@@ -4,3 +4,6 @@
 /visualisation_app/frontend/node_modules
 
 /visualisation_app/backend/uploads
+visualisation_app/frontend/.DS_Store
+.DS_Store
+visualisation_app/backend/.DS_Store
