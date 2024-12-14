@@ -9,7 +9,7 @@ import vtkPixelSpaceCallbackMapper from '@kitware/vtk.js/Rendering/Core/PixelSpa
 import vtk from '@kitware/vtk.js/vtk';
 import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget';
 import vtkAxesActor from '@kitware/vtk.js/Rendering/Core/AxesActor';
-import { styled } from '@mui/material/styles';
+import { styled, useTheme } from '@mui/material/styles';
 import { Box, Typography, CircularProgress, Button } from '@mui/material';
 import { useVTKState } from '../context/VTKContext';
 import Tooltip from './Tooltip';
@@ -70,16 +70,16 @@ const LoadingOverlay = styled(Box)({
   gap: '16px',
 });
 
-const ToggleButton = styled(Button)(({ theme }) => ({
+const ToggleButton = styled(Button)(({ theme, active }) => ({
   position: 'absolute',
   top: '10px',
   left: '10px',
   zIndex: 1,
-  backgroundColor: props => props.active ? theme.palette.primary.main : 'rgba(255, 255, 255, 0.05)',
-  borderColor: props => props.active ? theme.palette.primary.main : 'rgba(255, 255, 255, 0.1)',
+  backgroundColor: active ? theme.palette.primary.main : 'rgba(255, 255, 255, 0.05)',
+  borderColor: active ? theme.palette.primary.main : 'rgba(255, 255, 255, 0.1)',
   '&:hover': {
-    backgroundColor: props => props.active ? theme.palette.primary.dark : 'rgba(255, 255, 255, 0.1)',
-    borderColor: props => props.active ? theme.palette.primary.dark : 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: active ? theme.palette.primary.dark : 'rgba(255, 255, 255, 0.1)',
+    borderColor: active ? theme.palette.primary.dark : 'rgba(255, 255, 255, 0.2)',
   }
 }));
 
@@ -184,6 +184,7 @@ const VTPViewer = () => {
     neurons: false,
     connections: false
   });
+  const theme = useTheme();
 
   // Add the calcium visualization data at component level
   const calciumViz = useCalciumVisualization(calciumData, state.currentTimestep);
@@ -545,7 +546,10 @@ const VTPViewer = () => {
 
       if (neuronsActor) {
         const property = neuronsActor.getProperty();
-        property.setPointSize(state.neurons.options.pointSize);
+        // Only update point size directly if not in calcium mode
+        if (state.simulationType !== SIMULATION_TYPES.CALCIUM) {
+          property.setPointSize(state.neurons.options.pointSize);
+        }
         property.setOpacity(state.neurons.options.opacity);
       }
 
@@ -558,7 +562,7 @@ const VTPViewer = () => {
     }, 100);
 
     return () => clearTimeout(timeoutId);
-  }, [isInitialized, state.neurons.options, state.connections.options]);
+  }, [isInitialized, state.neurons.options, state.connections.options, state.simulationType]);
 
   const updateCanvasSize = useCallback(() => {
     if (!labelCanvas.current || !vtkContainerRef.current) return;
@@ -656,7 +660,6 @@ const VTPViewer = () => {
             return;
         }
 
-        const numPoints = points.getNumberOfPoints();
         const pointData = polyData.getPointData();
         if (!pointData) {
             console.log('No pointData found');
@@ -674,7 +677,7 @@ const VTPViewer = () => {
         const areaColorMap = new Map();
 
         // Group points by area
-        for (let i = 0; i < numPoints; i++) {
+        for (let i = 0; i < points.getNumberOfPoints(); i++) {
             const point = points.getPoint(i);
             const areaId = areaMap.get(i + 1); // Add 1 because IDs start at 1 in the text file
             
@@ -1005,7 +1008,110 @@ const VTPViewer = () => {
     loadBrodmannInfo();
   }, []);
 
-  // Add this effect to load calcium data
+  // 1. First define the calcium visualization function
+  const updateCalciumVisualization = useCallback(async () => {
+    if (!isInitialized || 
+        !calciumData || 
+        state.simulationType !== SIMULATION_TYPES.CALCIUM ||
+        !calciumViz) {
+      return;
+    }
+
+    const neuronsReader = context.current.readers.get('neurons');
+    const neuronsMapper = context.current.mappers.get('neurons');
+    if (!neuronsReader || !neuronsMapper) {
+      console.warn('Required VTK objects not available');
+      return;
+    }
+
+    try {
+      // Load and process area mapping
+      const areaMapping = new Map();
+      const response = await fetch('http://localhost:5000/files/info/area-info.txt');
+      const text = await response.text();
+      
+      text.split('\n').forEach(line => {
+        if (!line.startsWith('#') && line.trim()) {
+          const [id, , , , area] = line.trim().split(/\s+/);
+          if (area?.startsWith('area_')) {
+            areaMapping.set(parseInt(id), area);
+          }
+        }
+      });
+
+      // Set up VTK data structures
+      const polyData = neuronsReader.getOutputData(0);
+      const points = polyData.getPoints();
+      const numPoints = points.getNumberOfPoints();
+
+      // Create array for calcium differences
+      const calciumDiffs = new Float32Array(numPoints);
+
+      // Calculate differences for each neuron
+      let maxDiff = 0;
+      for (let i = 0; i < numPoints; i++) {
+        const neuronId = i + 1;
+        const areaId = areaMapping.get(neuronId);
+        const areaInfo = calciumViz.areaData.get(areaId);
+        
+        const diff = areaInfo?.difference ?? 0;
+        calciumDiffs[i] = diff;
+        maxDiff = Math.max(maxDiff, diff);
+      }
+
+      // Create and configure VTK scalar array
+      const calciumArray = vtk({
+        vtkClass: 'vtkDataArray',
+        name: 'calcium_differences',
+        numberOfComponents: 1,
+        values: calciumDiffs
+      });
+
+      // Update polydata with new scalars
+      polyData.getPointData().setScalars(calciumArray);
+
+      // Create and configure color mapping
+      const lut = vtkColorTransferFunction.newInstance();
+      context.current.lookupTables.set('calcium', lut);
+
+      // Configure color transfer function to match the legend
+      lut.addRGBPoint(0.0, 0.0, 1.0, 0.0);     // Green for no difference
+      lut.addRGBPoint(0.005, 0.5, 1.0, 0.0);   // Light green for 0.5% difference
+      lut.addRGBPoint(0.01, 1.0, 1.0, 0.0);    // Yellow for 1% difference
+      lut.addRGBPoint(0.015, 1.0, 0.5, 0.0);   // Orange for 1.5% difference
+      lut.addRGBPoint(0.02, 1.0, 0.0, 0.0);    // Red for 2% or greater difference
+
+      // Configure mapper
+      neuronsMapper.setInputData(polyData);
+      neuronsMapper.setScalarVisibility(true);
+      neuronsMapper.setLookupTable(lut);
+      neuronsMapper.setScalarRange(0, Math.max(0.02, maxDiff)); // Adjusted range to make small differences more visible
+
+      // Configure actor properties
+      const actor = context.current.actors.get('neurons');
+      if (actor) {
+        const property = actor.getProperty();
+        property.setAmbient(0.3);
+        property.setDiffuse(0.7);
+        
+        // Map point size based on calcium difference
+        const baseSize = state.neurons.options.pointSize;
+        const maxSizeMultiplier = 3; // Maximum size will be 3x the base size
+        const scaledSize = baseSize * (1 + (maxSizeMultiplier - 1) * (maxDiff > 0.5 ? 1 : maxDiff / 0.5));
+        property.setPointSize(scaledSize);
+      }
+
+      // Trigger updates
+      polyData.modified();
+      neuronsMapper.modified();
+      context.current.renderWindow.render();
+
+    } catch (error) {
+      console.error('Error updating calcium visualization:', error);
+    }
+  }, [isInitialized, calciumData, state.simulationType, state.currentTimestep, calciumViz, state.neurons.options.pointSize]);
+
+  // 2. Then use it in effects
   useEffect(() => {
     const loadCalciumData = async () => {
       if (state.simulationType !== SIMULATION_TYPES.CALCIUM) return;
@@ -1013,128 +1119,24 @@ const VTPViewer = () => {
       try {
         const response = await fetch('http://localhost:5000/files/calcium/calcium_data.json');
         const data = await response.json();
-        console.log('Calcium data timesteps:', {
-          first: data.timesteps[0],
-          last: data.timesteps[data.timesteps.length - 1],
-          count: data.timesteps.length,
-          step: data.timesteps[1] - data.timesteps[0]
-        });
         setCalciumData(data);
+        
+        // After setting calcium data, trigger visualization update if neurons are loaded
+        if (context.current.actors.get('neurons')) {
+          setTimeout(() => updateCalciumVisualization(), 0);
+        }
       } catch (error) {
         console.error('Error loading calcium data:', error);
       }
     };
 
     loadCalciumData();
-  }, [state.simulationType]);
+  }, [state.simulationType, updateCalciumVisualization]);
 
-  // Replace the existing calcium visualization effect with this new version
+  // 3. Add the timestep update effect
   useEffect(() => {
-    const updateCalciumVisualization = async () => {
-      if (!isInitialized || 
-          !calciumData || 
-          state.simulationType !== SIMULATION_TYPES.CALCIUM ||
-          !calciumViz) {
-        return;
-      }
-
-      const neuronsReader = context.current.readers.get('neurons');
-      const neuronsMapper = context.current.mappers.get('neurons');
-      if (!neuronsReader || !neuronsMapper) {
-        console.warn('Required VTK objects not available');
-        return;
-      }
-
-      try {
-        console.log('Updating calcium visualization...'); // Debug log
-
-        // Load and process area mapping
-        const areaMapping = new Map();
-        const response = await fetch('http://localhost:5000/files/info/area-info.txt');
-        const text = await response.text();
-        
-        text.split('\n').forEach(line => {
-          if (!line.startsWith('#') && line.trim()) {
-            const [id, , , , area] = line.trim().split(/\s+/);
-            if (area?.startsWith('area_')) {
-              areaMapping.set(parseInt(id), area);
-            }
-          }
-        });
-
-        // Set up VTK data structures
-        const polyData = neuronsReader.getOutputData(0);
-        const points = polyData.getPoints();
-        const numPoints = points.getNumberOfPoints();
-
-        console.log('Processing calcium differences for points:', numPoints); // Debug log
-
-        // Create array for calcium differences
-        const calciumDiffs = new Float32Array(numPoints);
-
-        // Calculate differences for each neuron
-        let maxDiff = 0;
-        for (let i = 0; i < numPoints; i++) {
-          const neuronId = i + 1;
-          const areaId = areaMapping.get(neuronId);
-          const areaInfo = calciumViz.areaData.get(areaId);
-          
-          const diff = areaInfo?.difference ?? 0;
-          calciumDiffs[i] = diff;
-          maxDiff = Math.max(maxDiff, diff);
-        }
-
-        console.log('Max calcium difference:', maxDiff); // Debug log
-
-        // Create and configure VTK scalar array
-        const calciumArray = vtk({
-          vtkClass: 'vtkDataArray',
-          name: 'calcium_differences',
-          numberOfComponents: 1,
-          values: calciumDiffs
-        });
-
-        // Update polydata with new scalars
-        polyData.getPointData().setScalars(calciumArray);
-
-        // Create and configure color mapping
-        const lut = vtkColorTransferFunction.newInstance();
-        context.current.lookupTables.set('calcium', lut);
-
-        // Configure color transfer function
-        lut.addRGBPoint(0.0, 0.0, 1.0, 0.0);  // Green for no difference
-        lut.addRGBPoint(0.2, 1.0, 1.0, 0.0);  // Yellow for small difference
-        lut.addRGBPoint(0.5, 1.0, 0.0, 0.0);  // Red for large difference
-
-        // Configure mapper
-        neuronsMapper.setInputData(polyData);
-        neuronsMapper.setScalarVisibility(true);
-        neuronsMapper.setLookupTable(lut);
-        neuronsMapper.setScalarRange(0, Math.max(0.5, maxDiff));
-        neuronsMapper.setScalarModeToUsePointData();
-        neuronsMapper.setColorModeToMapScalars();
-
-        // Configure actor properties
-        const actor = context.current.actors.get('neurons');
-        if (actor) {
-          const property = actor.getProperty();
-          property.setAmbient(0.3);
-          property.setDiffuse(0.7);
-          property.setColor(1.0, 1.0, 1.0);
-        }
-
-        // Trigger updates
-        polyData.modified();
-        neuronsMapper.modified();
-        context.current.renderWindow.render();
-
-      } catch (error) {
-        console.error('Error updating calcium visualization:', error);
-      }
-    };
-
     updateCalciumVisualization();
-  }, [isInitialized, calciumData, state.simulationType, state.currentTimestep, calciumViz]);
+  }, [updateCalciumVisualization, state.currentTimestep]);
 
   // Update the simulation type effect
   useEffect(() => {
@@ -1151,6 +1153,8 @@ const VTPViewer = () => {
       const actor = context.current.actors.get('neurons');
       if (actor) {
         actor.getProperty().setColor(1, 1, 1);
+        // Reset point size to base value from options
+        actor.getProperty().setPointSize(state.neurons.options.pointSize);
       }
       
       // Clear any existing lookup tables
@@ -1162,7 +1166,7 @@ const VTPViewer = () => {
       neuronsMapper.modified();
       context.current.renderWindow.render();
     }
-  }, [isInitialized, state.simulationType]);
+  }, [isInitialized, state.simulationType, state.neurons.options.pointSize]);
 
   // Add this new effect after your other useEffects
   useEffect(() => {
@@ -1217,6 +1221,134 @@ const VTPViewer = () => {
     
   }, [state.simulationType, isInitialized, cleanupVTKObjects]);
 
+  // Add this function near your other camera-related functions
+  const focusHighestDifference = useCallback(async () => {
+    if (!isInitialized || !calciumViz || !context.current.renderer) return;
+
+    try {
+      // Find area with highest difference
+      let maxDiff = 0;
+      let maxDiffAreaId = null;
+      calciumViz.areaData.forEach((data, areaId) => {
+        if (data.difference > maxDiff) {
+          maxDiff = data.difference;
+          maxDiffAreaId = areaId;
+        }
+      });
+
+      if (!maxDiffAreaId) return;
+
+      // Get the position of neurons in this area
+      const neuronsReader = context.current.readers.get('neurons');
+      const polyData = neuronsReader.getOutputData(0);
+      const points = polyData.getPoints();
+      const areaPoints = [];
+
+      // Load area mapping
+      const response = await fetch('http://localhost:5000/files/info/area-info.txt');
+      const text = await response.text();
+      const areaMapping = new Map();
+      
+      text.split('\n').forEach(line => {
+        if (!line.startsWith('#') && line.trim()) {
+          const [id, , , , area] = line.trim().split(/\s+/);
+          if (area?.startsWith('area_')) {
+            areaMapping.set(parseInt(id), area);
+          }
+        }
+      });
+
+      // Find points in target area
+      for (let i = 0; i < points.getNumberOfPoints(); i++) {
+        const neuronId = i + 1;
+        const areaId = areaMapping.get(neuronId);
+        if (areaId === maxDiffAreaId) {
+          areaPoints.push(points.getPoint(i));
+        }
+      }
+
+      if (areaPoints.length === 0) return;
+
+      // Calculate centroid
+      const centroid = areaPoints.reduce(
+        (acc, point) => [
+          acc[0] + point[0], 
+          acc[1] + point[1], 
+          acc[2] + point[2]
+        ],
+        [0, 0, 0]
+      ).map(coord => coord / areaPoints.length);
+
+      // Get camera and initial position
+      const camera = context.current.renderer.getActiveCamera();
+      const initialPosition = camera.getPosition();
+      const initialFocalPoint = camera.getFocalPoint();
+      const initialViewUp = camera.getViewUp();
+
+      // Store initial clipping range
+      const initialClippingRange = camera.getClippingRange();
+
+      // Calculate target camera position
+      const distance = camera.getDistance();
+      const direction = [
+        centroid[0] - initialFocalPoint[0],
+        centroid[1] - initialFocalPoint[1],
+        centroid[2] - initialFocalPoint[2]
+      ];
+      const length = Math.sqrt(direction[0]**2 + direction[1]**2 + direction[2]**2);
+      const targetPosition = [
+        centroid[0] + (direction[0] / length) * distance,
+        centroid[1] + (direction[1] / length) * distance,
+        centroid[2] + (direction[2] / length) * distance
+      ];
+
+      // Animate camera movement
+      const animationDuration = 2000;
+      const startTime = Date.now();
+
+      const animate = () => {
+        const now = Date.now();
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / animationDuration, 1);
+        
+        const easeT = t < 0.5 
+          ? 4 * t * t * t 
+          : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+        // Interpolate position
+        const newPosition = [
+          initialPosition[0] + (targetPosition[0] - initialPosition[0]) * easeT,
+          initialPosition[1] + (targetPosition[1] - initialPosition[1]) * easeT,
+          initialPosition[2] + (targetPosition[2] - initialPosition[2]) * easeT
+        ];
+
+        // Interpolate focal point
+        const newFocalPoint = [
+          initialFocalPoint[0] + (centroid[0] - initialFocalPoint[0]) * easeT,
+          initialFocalPoint[1] + (centroid[1] - initialFocalPoint[1]) * easeT,
+          initialFocalPoint[2] + (centroid[2] - initialFocalPoint[2]) * easeT
+        ];
+
+        camera.setPosition(...newPosition);
+        camera.setFocalPoint(...newFocalPoint);
+        
+        // Reset clipping range to ensure all objects are visible
+        context.current.renderer.resetCameraClippingRange();
+
+        context.current.renderWindow.render();
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+
+      animate();
+
+    } catch (error) {
+      console.error('Error focusing on highest difference:', error);
+    }
+  }, [isInitialized, calciumViz]);
+
   return (
     <ViewerContainer>
       <VTKContainer ref={vtkContainerRef} sx={{ visibility: isInitialized ? 'visible' : 'hidden' }} />
@@ -1237,6 +1369,22 @@ const VTPViewer = () => {
         <Button variant="contained" onClick={() => setCameraPosition('right')} sx={{ m: 1 }}>
           Right View
         </Button>
+        {state.simulationType === SIMULATION_TYPES.CALCIUM && (
+          <Button 
+            variant="contained" 
+            onClick={() => focusHighestDifference().catch(console.error)} 
+            sx={{ 
+              m: 1,
+              background: theme.palette.gradients.blue,
+              '&:hover': {
+                background: theme.palette.gradients.blue,
+                filter: 'brightness(0.9)'
+              }
+            }}
+          >
+            Focus Highest Difference
+          </Button>
+        )}
       </Box>
       <InfoOverlay>
         <StyledTypography>
@@ -1269,7 +1417,7 @@ const VTPViewer = () => {
             <Box sx={{ 
               width: '180px',
               height: '20px',
-              background: 'linear-gradient(90deg, #00FF00, #FFFF00, #FF0000)',
+              background: 'linear-gradient(90deg, #00FF00, #80FF00, #FFFF00, #FF8000, #FF0000)',
               borderRadius: '2px',
               mb: 0.5
             }} />
@@ -1281,8 +1429,10 @@ const VTPViewer = () => {
               fontSize: '0.75rem'
             }}>
               <span>0%</span>
-              <span>50%</span>
-              <span>100%</span>
+              <span>0.5%</span>
+              <span>1%</span>
+              <span>1.5%</span>
+              <span>2%+</span>
             </Box>
             <Typography variant="caption" sx={{ color: 'white', mt: 1, textAlign: 'center' }}>
               Difference from target calcium level
