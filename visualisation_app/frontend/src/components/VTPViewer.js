@@ -10,9 +10,6 @@ import vtk from '@kitware/vtk.js/vtk';
 import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget';
 import vtkAnnotatedCubeActor from '@kitware/vtk.js/Rendering/Core/AnnotatedCubeActor';
 import vtkTubeFilter from '@kitware/vtk.js/Filters/General/TubeFilter';
-import vtkSplineWidget from '@kitware/vtk.js/Widgets/Widgets3D/SplineWidget';
-import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
-import { splineKind } from '@kitware/vtk.js/Common/DataModel/Spline3D/Constants';
 import { styled, useTheme } from '@mui/material/styles';
 import { Box, Typography, CircularProgress, Button } from '@mui/material';
 import { useVTKState } from '../context/VTKContext';
@@ -165,6 +162,21 @@ const hexToRgb = (hex) => {
     g: parseInt(result[2], 16),
     b: parseInt(result[3], 16)
   } : null;
+};
+
+const formatSimulationType = (type) => {
+  switch (type) {
+    case SIMULATION_TYPES.NO_NETWORK:
+      return "No Network";
+    case SIMULATION_TYPES.CALCIUM:
+      return "Calcium";
+    case SIMULATION_TYPES.DISABLE:
+      return "Disable";
+    case SIMULATION_TYPES.STIMULUS:
+      return "Stimulus";
+    default:
+      return type;
+  }
 };
 
 const VTPViewer = () => {
@@ -486,79 +498,28 @@ const VTPViewer = () => {
                 throw new Error('Failed to read connections data');
               }
 
-              // Debug log the connection weights
-              const cellData = output.getCellData();
-              const weights = cellData.getArrayByName('ConnectionWeight');
-              let weightRange = [0, 1]; // Default range
-
-              if (weights) {
-                weightRange = weights.getRange();
-                console.log("\nConnection weights from VTP file:");
-                console.log("Weight range:", weightRange);
-                console.log("Number of weights:", weights.getNumberOfTuples());
-                console.log("First 10 weights:", Array.from({length: Math.min(10, weights.getNumberOfTuples())}, 
-                  (_, i) => weights.getTuple(i)[0]));
-              }
-
-              console.log('Loaded connections data:', {
-                timestep: state.currentTimestep,
-                numberOfPoints: output.getNumberOfPoints(),
-                numberOfCells: output.getNumberOfCells(),
-                arrays: output.getCellData().getArrays().map(arr => ({
-                  name: arr.getName(),
-                  numberOfComponents: arr.getNumberOfComponents(),
-                  dataRange: arr.getRange()
-                }))
-              });
-
-              setLoadingProgress(90);
-
-              // Create tube filter with adjusted parameters
+              // Create tube filter directly on the polydata
               const tubeFilter = vtkTubeFilter.newInstance();
               tubeFilter.setInputData(output);
-              tubeFilter.setRadius(0.05);  // Base radius
+              tubeFilter.setRadius(0.05);
               tubeFilter.setNumberOfSides(20);
               tubeFilter.setCapping(true);
 
-              // Important: Set the array to process BEFORE setting varyRadius
-              tubeFilter.setInputArrayToProcess(0,  // connection #
-                'ConnectionWeight',  // array name
-                'CellData',         // data type
-                'Scalars'           // attribute type - this was missing!
-              );
-
-              // Now set the vary radius mode
-              tubeFilter.setVaryRadius(1);  
-              tubeFilter.setRadiusFactor(50.0);  
+              // Set up radius variation based on connection weights
+              tubeFilter.setInputArrayToProcess(0, 'ConnectionWeight', 'CellData', 'Scalars');
+              tubeFilter.setVaryRadius(1);  // Use scalar values to vary radius
+              tubeFilter.setRadiusFactor(50.0);  // Amplify the variation
 
               // Create mapper and actor
               const mapper = vtkMapper.newInstance();
               mapper.setInputConnection(tubeFilter.getOutputPort());
+              mapper.setScalarVisibility(false);  // Turn off scalar coloring
 
-              // Set up color mapping using the actual data range
-              const lut = vtkColorTransferFunction.newInstance();
-              lut.addRGBPoint(weightRange[0], 0.1, 0.1, 0.1);     // Very dark for minimum
-              lut.addRGBPoint(weightRange[0] + (weightRange[1] - weightRange[0]) * 0.3, 0.4, 0.4, 0.4);  // Medium
-              lut.addRGBPoint(weightRange[1], 1.0, 1.0, 1.0);     // Bright white for maximum
-
-              // Configure the mapper
-              mapper.setScalarVisibility(true);
-              mapper.setScalarModeToUseCellData();
-              mapper.setColorModeToMapScalars();
-              mapper.setInputArrayToProcess(0, 'ConnectionWeight', 'CellData', 'Scalars');
-              mapper.setLookupTable(lut);
-              mapper.setScalarRange(weightRange[0], weightRange[1]);
-
+              // Simple grey color
               const actor = vtkActor.newInstance();
               actor.setMapper(mapper);
-
-              // Configure actor properties
-              const property = actor.getProperty();
-              property.setOpacity(0.8);
-              property.setAmbient(0.3);
-              property.setDiffuse(0.7);
-              property.setSpecular(0.3);
-              property.setSpecularPower(20);
+              actor.getProperty().setColor(0.5, 0.5, 0.5); 
+              actor.getProperty().setOpacity(0.8);
 
               // Add to renderer
               context.current.renderer.addActor(actor);
@@ -567,7 +528,6 @@ const VTPViewer = () => {
 
               // Store references for cleanup
               context.current.mappers.set('connections', mapper);
-              context.current.lookupTables.set('connections', lut);
 
               setLoadingStates(prev => ({ ...prev, connections: false }));
             } catch (error) {
@@ -1562,10 +1522,10 @@ const VTPViewer = () => {
       }}>
         <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
           <Button variant="contained" onClick={() => setCameraPosition('front')} sx={{ m: 1 }}>
-            Front View
+            Anterior View
           </Button>
           <Button variant="contained" onClick={() => setCameraPosition('top')} sx={{ m: 1 }}>
-            Top View
+            Superior View
           </Button>
           <Button variant="contained" onClick={() => setCameraPosition('right')} sx={{ m: 1 }}>
             Right View
@@ -1584,13 +1544,13 @@ const VTPViewer = () => {
               }
             }}
           >
-            Focus Highest Difference
+            Turn to Area of Maximum Calcium Gradient
           </Button>
         )}
       </Box>
       <InfoOverlay>
         <StyledTypography>
-          Simulation: {state.simulationType}
+          Simulation: {formatSimulationType(state.simulationType)}
         </StyledTypography>
         <StyledTypography>
           Timestep: {state.currentTimestep.toLocaleString()}

@@ -44,13 +44,28 @@ def read_network_connections(file_path):
             for line in file:
                 if line.startswith('#') or not line.strip():
                     continue
-                data = line.strip().split()
-                source_id = int(data[1])
-                target_id = int(data[3])
-                connections.append((source_id, target_id))
+                # Clean the data by removing null bytes and extra whitespace
+                cleaned_line = line.strip().replace('\x00', '').strip()
+                data = cleaned_line.split()
+                
+                try:
+                    # Make sure we have enough valid data
+                    if len(data) >= 4:
+                        source_id = int(data[1])
+                        target_id = int(data[3])
+                        connections.append((source_id, target_id))
+                except (ValueError, IndexError) as e:
+                    print(f"Warning: Skipping malformed line in {file_path}: {cleaned_line}")
+                    continue
+                    
     except FileNotFoundError:
         print(f"File {file_path} not found.")
         return None
+    except Exception as e:
+        print(f"Error reading file {file_path}: {str(e)}")
+        return None
+        
+    print(f"Read {len(connections)} connections from {file_path}")
     return connections
 
 
