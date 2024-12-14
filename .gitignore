@@ -6,7 +6,4 @@
 visualisation_app/frontend/.DS_Store
 .DS_Store
 visualisation_app/backend/.DS_Store
-/visualisation_app/backend/uploads/calcium
-/visualisation_app/backend/uploads/no-network
-/visualisation_app/backend/uploads/disable
-/visualisation_app/backend/uploads/stimulus
+*.vtp
