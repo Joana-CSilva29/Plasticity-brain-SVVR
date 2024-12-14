@@ -43,6 +43,8 @@ const initialState = {
   lastUpdate: Date.now(),
   loadConnections: true,
   visualizationMode: VISUALIZATION_MODES.BOTH,
+  isAnimating: false,
+  animationSpeed: 100,
 };
 
 const THROTTLE_TIME = 16;
@@ -154,6 +156,23 @@ function vtkReducer(state, action) {
         ...state,
         visualizationMode: action.payload,
         loadConnections: action.payload !== VISUALIZATION_MODES.NEURONS_ONLY,
+        lastUpdate: currentTime
+      };
+
+    case 'TOGGLE_ANIMATION':
+      return {
+        ...state,
+        isAnimating: !state.isAnimating,
+        ...(state.isAnimating ? { 
+          currentTimestep: Math.round(state.currentTimestep / state.stepSize) * state.stepSize 
+        } : {}),
+        lastUpdate: currentTime
+      };
+
+    case 'SET_ANIMATION_SPEED':
+      return {
+        ...state,
+        animationSpeed: action.payload,
         lastUpdate: currentTime
       };
 

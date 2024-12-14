@@ -12,7 +12,7 @@ import vtkAnnotatedCubeActor from '@kitware/vtk.js/Rendering/Core/AnnotatedCubeA
 import vtkTubeFilter from '@kitware/vtk.js/Filters/General/TubeFilter';
 import { styled, useTheme } from '@mui/material/styles';
 import { Box, Typography, CircularProgress, Button } from '@mui/material';
-import { useVTKState } from '../context/VTKContext';
+import { useVTKState, useVTKDispatch } from '../context/VTKContext';
 import Tooltip from './Tooltip';
 import { SIMULATION_TYPES, VISUALIZATION_MODES } from '../context/VTKContext';
 
@@ -181,6 +181,7 @@ const formatSimulationType = (type) => {
 
 const VTPViewer = () => {
   const state = useVTKState();
+  const dispatch = useVTKDispatch();
   const vtkContainerRef = useRef(null);
   const [containerReady, setContainerReady] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -462,7 +463,17 @@ const VTPViewer = () => {
               
               const connectionsResponse = await fetch(state.connections.fileUrl);
               if (!connectionsResponse.ok) {
-                throw new Error(`Connections not available: ${state.connections.fileUrl}`);
+                console.log(`No connections available for timestep ${state.currentTimestep}`);
+                // Clean up any existing connections
+                const oldActor = context.current.actors.get('connections');
+                if (oldActor) {
+                  context.current.renderer.removeActor(oldActor);
+                  oldActor.delete();
+                  context.current.actors.delete('connections');
+                }
+                // Update loading state and continue
+                setLoadingStates(prev => ({ ...prev, connections: false }));
+                return;  // Exit early but don't throw error
               }
               if (isCancelled) return;
               
@@ -532,6 +543,13 @@ const VTPViewer = () => {
               setLoadingStates(prev => ({ ...prev, connections: false }));
             } catch (error) {
               console.error('Error loading connections:', error);
+              // Clean up any existing connections
+              const oldActor = context.current.actors.get('connections');
+              if (oldActor) {
+                context.current.renderer.removeActor(oldActor);
+                oldActor.delete();
+                context.current.actors.delete('connections');
+              }
               setLoadingStates(prev => ({ ...prev, connections: false }));
             }
           } else {
@@ -1500,6 +1518,100 @@ const VTPViewer = () => {
       console.error('Error focusing on highest difference:', error);
     }
   }, [isInitialized, calciumViz]);
+
+  // Add animation effect
+  useEffect(() => {
+    if (!state.isAnimating) {
+      // Make sure we clean up any pending loads when animation stops
+      context.current.renderWindow?.render();
+      return;
+    }
+
+    let animationFrame;
+    let isCancelled = false;
+
+    const animate = async () => {
+      if (isCancelled) return;
+
+      const nextTimestep = state.currentTimestep + state.stepSize;
+      
+      if (nextTimestep > state.maxTimestep) {
+        dispatch({ type: 'TOGGLE_ANIMATION' }); // Stop animation
+        return;
+      }
+
+      try {
+        // Preload next connection data
+        const nextUrl = `http://localhost:5000/files/${state.simulationType}/connections_${String(nextTimestep).padStart(7, '0')}.vtp`;
+        const response = await fetch(nextUrl);
+        
+        if (response.ok && !isCancelled) {
+          const buffer = await response.arrayBuffer();
+          if (!isCancelled) {
+            loadConnectionData(buffer);
+            dispatch({ type: 'SET_TIMESTEP', payload: nextTimestep });
+            animationFrame = setTimeout(animate, state.animationSpeed);
+          }
+        }
+      } catch (error) {
+        console.log('No connections for next timestep');
+        if (!isCancelled) {
+          dispatch({ type: 'SET_TIMESTEP', payload: nextTimestep });
+          animationFrame = setTimeout(animate, state.animationSpeed);
+        }
+      }
+    };
+
+    animate();
+
+    return () => {
+      isCancelled = true;
+      if (animationFrame) {
+        clearTimeout(animationFrame);
+      }
+    };
+  }, [state.isAnimating, state.currentTimestep, state.stepSize, state.maxTimestep, state.animationSpeed, dispatch, state.simulationType]);
+
+  // Add optimized connection loading function
+  const loadConnectionData = (buffer) => {
+    try {
+      const connectionsReader = vtkXMLPolyDataReader.newInstance();
+      connectionsReader.parseAsArrayBuffer(buffer);
+      const output = connectionsReader.getOutputData(0);
+
+      const tubeFilter = vtkTubeFilter.newInstance();
+      tubeFilter.setInputData(output);
+      tubeFilter.setRadius(0.05);
+      tubeFilter.setNumberOfSides(20);
+      tubeFilter.setCapping(true);
+      tubeFilter.setInputArrayToProcess(0, 'ConnectionWeight', 'CellData', 'Scalars');
+      tubeFilter.setVaryRadius(1);
+      tubeFilter.setRadiusFactor(50.0);
+
+      const mapper = vtkMapper.newInstance();
+      mapper.setInputConnection(tubeFilter.getOutputPort());
+      mapper.setScalarVisibility(false);
+
+      const actor = vtkActor.newInstance();
+      actor.setMapper(mapper);
+      actor.getProperty().setColor(0.5, 0.5, 0.5);
+      actor.getProperty().setOpacity(0.8);
+
+      // Clean up old actor
+      const oldActor = context.current.actors.get('connections');
+      if (oldActor) {
+        context.current.renderer.removeActor(oldActor);
+        oldActor.delete();
+      }
+
+      // Add new actor
+      context.current.renderer.addActor(actor);
+      context.current.actors.set('connections', actor);
+      context.current.renderWindow.render();
+    } catch (error) {
+      console.error('Error loading connection data:', error);
+    }
+  };
 
   return (
     <ViewerContainer>
