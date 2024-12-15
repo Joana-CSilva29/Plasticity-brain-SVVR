@@ -14,12 +14,6 @@ import { useVTKState, useVTKDispatch, SIMULATION_TYPES } from '../context/VTKCon
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import VisualizationModeToggle from './VisualizationModeToggle';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import PauseIcon from '@mui/icons-material/Pause';
-import SkipNextIcon from '@mui/icons-material/SkipNext';
-import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
-import FirstPageIcon from '@mui/icons-material/FirstPage';
-import LastPageIcon from '@mui/icons-material/LastPage';
 
 const StyledSelect = styled(TextField)(({ theme }) => ({
   '& .MuiInputBase-input': {
@@ -118,22 +112,6 @@ const StyledSlider = styled(Slider)(({ theme }) => ({
   },
 }));
 
-const PlayButton = styled(Button)(({ theme }) => ({
-  width: '40px',
-  height: '40px',
-  minWidth: '40px',
-  borderRadius: '4px',
-  padding: 0,
-  background: theme.palette.gradients.blue,
-  '&:hover': {
-    background: theme.palette.gradients.blue,
-    filter: 'brightness(1.05)',
-  },
-  '& .MuiSvgIcon-root': {
-    fontSize: '24px',
-  }
-}));
-
 const SimulationControls = () => {
   const state = useVTKState();
   const dispatch = useVTKDispatch();
@@ -222,19 +200,6 @@ const SimulationControls = () => {
             valueLabelFormat={value => value.toLocaleString()}
             aria-label="Timestep"
           />
-        </Box>
-
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'center',
-          mt: 2 
-        }}>
-          <PlayButton
-            onClick={() => dispatch({ type: 'TOGGLE_ANIMATION' })}
-            title={state.isAnimating ? 'Pause' : 'Play'}
-          >
-            {state.isAnimating ? <PauseIcon /> : <PlayArrowIcon />}
-          </PlayButton>
         </Box>
       </TimestepControl>
 

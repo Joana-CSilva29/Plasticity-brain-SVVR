@@ -16,6 +16,7 @@ import { useVTKState, useVTKDispatch } from '../context/VTKContext';
 import Tooltip from './Tooltip';
 import { SIMULATION_TYPES, VISUALIZATION_MODES } from '../context/VTKContext';
 import { useStimulusVisualization } from '../hooks/vtk/useStimulusVisualization';
+import { useDisableVisualization } from '../hooks/vtk/useDisableVisualization';
 
 
 const FIXED_MIN = -70;  // Fixed minimum membrane potential (mV)
@@ -230,6 +231,8 @@ const VTPViewer = () => {
   const [flashPhase, setFlashPhase] = useState(0);
   // Add this state to track stimulated neurons
   const [stimulatedNeurons, setStimulatedNeurons] = useState(new Set());
+  const [disableData, setDisableData] = useState(null);
+  const disableViz = useDisableVisualization(disableData, state.currentTimestep);
 
   // Add the calcium visualization data at component level
   const calciumViz = useCalciumVisualization(calciumData, state.currentTimestep);
@@ -1966,6 +1969,262 @@ const VTPViewer = () => {
     }
   }, [isInitialized, stimulusViz]);
 
+  // Add this effect to load disable data
+  useEffect(() => {
+    const loadDisableData = async () => {
+      if (state.simulationType !== SIMULATION_TYPES.DISABLE) return;
+      
+      try {
+        const response = await fetch('http://localhost:5000/files/disable/disable_data.json');
+        const data = await response.json();
+        setDisableData(data);
+        
+        if (context.current.actors.get('neurons')) {
+          setTimeout(() => updateDisableVisualization(), 0);
+        }
+      } catch (error) {
+        console.error('Error loading disable data:', error);
+      }
+    };
+
+    loadDisableData();
+  }, [state.simulationType]);
+
+  // Add this function to update the visualization
+  const updateDisableVisualization = useCallback(async () => {
+    if (!isInitialized || !disableData || !disableViz) return;
+
+    const neuronsReader = context.current.readers.get('neurons');
+    const neuronsMapper = context.current.mappers.get('neurons');
+    if (!neuronsReader || !neuronsMapper) {
+      console.warn('Required VTK objects not available');
+      return;
+    }
+
+    try {
+      // Load and process area mapping
+      const areaMapping = new Map();
+      const response = await fetch('http://localhost:5000/files/info/area-info.txt');
+      const text = await response.text();
+      
+      text.split('\n').forEach(line => {
+        if (!line.startsWith('#') && line.trim()) {
+          const [id, , , , area] = line.trim().split(/\s+/);
+          if (area?.startsWith('area_')) {
+            areaMapping.set(parseInt(id), area);
+          }
+        }
+      });
+
+      const polyData = neuronsReader.getOutputData(0);
+      const points = polyData.getPoints();
+      const numPoints = points.getNumberOfPoints();
+
+      // Create array for activity levels
+      const activityLevels = new Float32Array(numPoints);
+      
+      // Process all points
+      for (let i = 0; i < numPoints; i++) {
+        const neuronId = i + 1;
+        const areaId = areaMapping.get(neuronId);
+        const areaInfo = disableViz.areaData.get(areaId);
+        
+        if (areaInfo?.isDisabled) {
+          // Set disabled areas to maximum value (will be mapped to white)
+          activityLevels[i] = 1.0;
+        } else {
+          const activity = areaInfo?.activityLevel ?? -65;
+          const normalized = (activity - FIXED_MIN) / (FIXED_MAX - FIXED_MIN);
+          activityLevels[i] = Math.max(0, Math.min(1, normalized));
+        }
+      }
+
+      // Create and configure VTK scalar array
+      const activityArray = vtk({
+        vtkClass: 'vtkDataArray',
+        name: 'activity_levels',
+        numberOfComponents: 1,
+        values: activityLevels
+      });
+
+      // Update polydata with scalar array
+      polyData.getPointData().setScalars(activityArray);
+
+      // Configure color mapping
+      const lut = vtkColorTransferFunction.newInstance();
+      context.current.lookupTables.set('disable', lut);
+
+      // Color scheme: active areas in blue-red gradient, disabled areas in white
+      lut.addRGBPoint(0.0, 0.0, 0.0, 0.8);   // Blue for low activity
+      lut.addRGBPoint(0.4, 0.8, 0.0, 0.0);   // Red for medium activity
+      lut.addRGBPoint(0.8, 1.0, 0.0, 0.0);   // Bright red for high activity
+      lut.addRGBPoint(1.0, 1.0, 1.0, 1.0);   // White for disabled areas
+
+      // Configure mapper
+      neuronsMapper.setInputData(polyData);
+      neuronsMapper.setScalarVisibility(true);
+      neuronsMapper.setLookupTable(lut);
+      neuronsMapper.setScalarRange(0, 1);
+
+      // Configure actor properties
+      const actor = context.current.actors.get('neurons');
+      if (actor) {
+        const property = actor.getProperty();
+        property.setAmbient(0.3);
+        property.setDiffuse(0.7);
+        
+        // Reduce opacity for disabled areas
+        const basePointSize = state.neurons.options.pointSize;
+        property.setPointSize(basePointSize);
+      }
+
+      // Trigger updates
+      polyData.modified();
+      neuronsMapper.modified();
+      context.current.renderWindow.render();
+
+    } catch (error) {
+      console.error('Error updating disable visualization:', error);
+    }
+  }, [isInitialized, disableData, state.simulationType, state.currentTimestep, disableViz, state.neurons.options.pointSize]);
+
+  // Add this effect to update visualization when timestep changes
+  useEffect(() => {
+    if (state.simulationType === SIMULATION_TYPES.DISABLE) {
+      updateDisableVisualization();
+    }
+  }, [updateDisableVisualization, state.currentTimestep]);
+
+  // Replace the existing focusDisabledArea function with this:
+  const focusDisabledArea = useCallback(async () => {
+    if (!isInitialized || !disableViz || !context.current.renderer) return;
+
+    try {
+      // Find area with highest activity
+      let maxActivity = -Infinity;
+      let maxActivityAreaId = null;
+      disableViz.areaData.forEach((data, areaId) => {
+        // Only consider non-disabled areas
+        if (!data.isDisabled && data.activityLevel > maxActivity) {
+          maxActivity = data.activityLevel;
+          maxActivityAreaId = areaId;
+        }
+      });
+
+      if (!maxActivityAreaId) {
+        console.warn('No active areas found');
+        return;
+      }
+
+      // Get all the points data
+      const neuronsReader = context.current.readers.get('neurons');
+      const polyData = neuronsReader.getOutputData(0);
+      const points = polyData.getPoints();
+      const areaPoints = [];
+
+      // Get the center of the brain
+      const bounds = polyData.getBounds();
+      const center = [
+        (bounds[0] + bounds[1]) / 2,
+        (bounds[2] + bounds[3]) / 2,
+        (bounds[4] + bounds[5]) / 2
+      ];
+
+      // Load area mapping
+      const response = await fetch('http://localhost:5000/files/info/area-info.txt');
+      const text = await response.text();
+      const areaMapping = new Map();
+      
+      text.split('\n').forEach(line => {
+        if (!line.startsWith('#') && line.trim()) {
+          const [id, , , , area] = line.trim().split(/\s+/);
+          if (area?.startsWith('area_')) {
+            areaMapping.set(parseInt(id), area);
+          }
+        }
+      });
+
+      // Collect points for target area
+      for (let i = 0; i < points.getNumberOfPoints(); i++) {
+        const neuronId = i + 1;
+        const areaId = areaMapping.get(neuronId);
+        if (areaId === maxActivityAreaId) {
+          areaPoints.push(points.getPoint(i));
+        }
+      }
+
+      if (areaPoints.length === 0) {
+        console.warn('No points found for target area');
+        return;
+      }
+
+      // Calculate target point (centroid of area)
+      const targetPoint = areaPoints.reduce(
+        (acc, point) => [
+          acc[0] + point[0], 
+          acc[1] + point[1], 
+          acc[2] + point[2]
+        ],
+        [0, 0, 0]
+      ).map(coord => coord / areaPoints.length);
+
+      // Get camera initial state
+      const camera = context.current.renderer.getActiveCamera();
+      const initialPosition = camera.getPosition();
+      const distance = camera.getDistance();
+
+      // Calculate direction from center to target point
+      const direction = [
+        targetPoint[0] - center[0],
+        targetPoint[1] - center[1],
+        targetPoint[2] - center[2]
+      ];
+      const length = Math.sqrt(direction[0]**2 + direction[1]**2 + direction[2]**2);
+
+      // Calculate target camera position
+      const targetPosition = [
+        center[0] + (direction[0] / length) * distance,
+        center[1] + (direction[1] / length) * distance,
+        center[2] + (direction[2] / length) * distance
+      ];
+
+      // Animation setup
+      const animationDuration = 2000;
+      const startTime = Date.now();
+
+      const animate = () => {
+        const now = Date.now();
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / animationDuration, 1);
+        
+        const easeT = t < 0.5 
+          ? 4 * t * t * t 
+          : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+        // Interpolate position
+        const newPosition = [
+          initialPosition[0] + (targetPosition[0] - initialPosition[0]) * easeT,
+          initialPosition[1] + (targetPosition[1] - initialPosition[1]) * easeT,
+          initialPosition[2] + (targetPosition[2] - initialPosition[2]) * easeT
+        ];
+
+        camera.setPosition(...newPosition);
+        camera.setFocalPoint(...center);
+        context.current.renderer.resetCameraClippingRange();
+        context.current.renderWindow.render();
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+
+      animate();
+
+    } catch (error) {
+      console.error('Error focusing on highest activity:', error);
+    }
+  }, [isInitialized, disableViz]);
+
   return (
     <ViewerContainer>
       <VTKContainer ref={vtkContainerRef} sx={{ visibility: isInitialized ? 'visible' : 'hidden' }} />
@@ -2021,6 +2280,22 @@ const VTPViewer = () => {
               background: theme.palette.gradients.red,
               '&:hover': {
                 background: theme.palette.gradients.red,
+                filter: 'brightness(0.9)'
+              }
+            }}
+          >
+            Turn to Area of Maximum Activity
+          </Button>
+        )}
+        {state.simulationType === SIMULATION_TYPES.DISABLE && (
+          <Button 
+            variant="contained" 
+            onClick={() => focusDisabledArea().catch(console.error)} 
+            sx={{ 
+              width: '100%',
+              background: theme.palette.gradients.gray,
+              '&:hover': {
+                background: theme.palette.gradients.gray,
                 filter: 'brightness(0.9)'
               }
             }}
@@ -2135,6 +2410,46 @@ const VTPViewer = () => {
             {stimulusViz?.areaData?.get('area_34')?.isStimulated && (
               <Typography variant="caption" sx={{ color: '#FF5500', mt: 0.5, fontWeight: 'bold' }}>
                 Area 34 under stimulation
+              </Typography>
+            )}
+          </Box>
+        </ColorLegend>
+      )}
+      {state.simulationType === SIMULATION_TYPES.DISABLE && disableData && (
+        <ColorLegend sx={{ backgroundColor: 'transparent' }}>
+          <Typography variant="subtitle2" sx={{ color: 'white', mb: 1 }}>
+            Neural Activity Level
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ 
+              width: '180px',
+              height: '20px',
+              background: 'linear-gradient(90deg, #0000CC, #CC0000, #FF0000)',
+              borderRadius: '2px',
+              mb: 0.5
+            }} />
+            <Box sx={{ 
+              display: 'flex', 
+              justifyContent: 'space-between',
+              width: '180px',
+              color: 'white',
+              fontSize: '0.75rem'
+            }}>
+              <span>Low</span>
+              <span>Med</span>
+              <span>High</span>
+            </Box>
+            <Typography variant="caption" sx={{ color: 'white', mt: 1, textAlign: 'center' }}>
+              Activity levels (disabled areas shown in white)
+            </Typography>
+            {disableViz?.areaData?.get('area_5')?.isDisabled && (
+              <Typography variant="caption" sx={{ color: '#FFFFFF', mt: 0.5, fontWeight: 'bold' }}>
+                Area 5 disabled
+              </Typography>
+            )}
+            {disableViz?.areaData?.get('area_8')?.isDisabled && (
+              <Typography variant="caption" sx={{ color: '#FFFFFF', mt: 0.5, fontWeight: 'bold' }}>
+                Area 8 disabled
               </Typography>
             )}
           </Box>
