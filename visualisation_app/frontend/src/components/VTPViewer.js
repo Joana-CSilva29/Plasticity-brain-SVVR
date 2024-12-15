@@ -15,6 +15,11 @@ import { Box, Typography, CircularProgress, Button } from '@mui/material';
 import { useVTKState, useVTKDispatch } from '../context/VTKContext';
 import Tooltip from './Tooltip';
 import { SIMULATION_TYPES, VISUALIZATION_MODES } from '../context/VTKContext';
+import { useStimulusVisualization } from '../hooks/vtk/useStimulusVisualization';
+
+
+const FIXED_MIN = -70;  // Fixed minimum membrane potential (mV)
+const FIXED_MAX = -30;  // Fixed maximum membrane potential (mV)
 
 const ViewerContainer = styled(Box)({
   width: '100%',
@@ -214,9 +219,21 @@ const VTPViewer = () => {
     connections: false
   });
   const theme = useTheme();
+  const [stimulusData, setStimulusData] = useState(null);
+  // Add these state variables near your other useState declarations
+  const [activityStats, setActivityStats] = useState({
+    minActivity: -65,
+    maxActivity: -54,
+    meanActivity: -60
+  });
+  // Add this near your other state declarations
+  const [flashPhase, setFlashPhase] = useState(0);
+  // Add this state to track stimulated neurons
+  const [stimulatedNeurons, setStimulatedNeurons] = useState(new Set());
 
   // Add the calcium visualization data at component level
   const calciumViz = useCalciumVisualization(calciumData, state.currentTimestep);
+  const stimulusViz = useStimulusVisualization(stimulusData, state.currentTimestep);
 
   const cleanupVTKObjects = useCallback(() => {
     // Always clean up readers, mappers, and lookup tables
@@ -702,21 +719,21 @@ const VTPViewer = () => {
   // Add this function to create labels
   const createLabels = useCallback(async () => {
     if (!context.current.renderer || !labelContext.current) {
-        console.log('Missing renderer or label context');
-        return;
+      console.log('Missing renderer or label context');
+      return;
     }
 
     // Clean up existing label actor
     if (labelActor) {
-        context.current.renderer.removeActor(labelActor);
-        labelActor.delete();
+      context.current.renderer.removeActor(labelActor);
+      labelActor.delete();
     }
 
     // Fetch area labels
     const areaMap = await fetchAreaLabels();
     if (!areaMap) {
-        console.log('Failed to load area labels');
-        return;
+      console.log('Failed to load area labels');
+      return;
     }
 
     const psMapper = vtkPixelSpaceCallbackMapper.newInstance();
@@ -725,230 +742,223 @@ const VTPViewer = () => {
     actor.setMapper(psMapper);
 
     try {
-        // Get centroids from the neurons data
-        const neuronsReader = context.current.readers.get('neurons');
-        if (!neuronsReader) {
-            console.log('No neurons reader found');
-            return;
+      // Get centroids from the neurons data
+      const neuronsReader = context.current.readers.get('neurons');
+      if (!neuronsReader) {
+        console.log('No neurons reader found');
+        return;
+      }
+
+      const polyData = neuronsReader.getOutputData(0);
+      if (!polyData) {
+        console.log('No polyData found');
+        return;
+      }
+
+      const points = polyData.getPoints();
+      if (!points) {
+        console.log('No points found');
+        return;
+      }
+
+      const pointData = polyData.getPointData();
+      if (!pointData) {
+        console.log('No pointData found');
+        return;
+      }
+
+      const colors = pointData.getScalars();
+      if (!colors) {
+        console.log('No colors found');
+        return;
+      }
+
+      // Calculate centroids for each area
+      const areaCentroids = new Map();
+      const areaColorMap = new Map();
+
+      // Group points by area
+      for (let i = 0; i < points.getNumberOfPoints(); i++) {
+        const point = points.getPoint(i);
+        const areaId = areaMap.get(i + 1);
+        
+        if (!areaId) continue;
+
+        if (!areaCentroids.has(areaId)) {
+          areaCentroids.set(areaId, []);
+          const color = colors.getTuple(i);
+          areaColorMap.set(areaId, color);
         }
+        areaCentroids.get(areaId).push(point);
+      }
 
-        const polyData = neuronsReader.getOutputData(0);
-        if (!polyData) {
-            console.log('No polyData found');
-            return;
-        }
-
-        const points = polyData.getPoints();
-        if (!points) {
-            console.log('No points found');
-            return;
-        }
-
-        const pointData = polyData.getPointData();
-        if (!pointData) {
-            console.log('No pointData found');
-            return;
-        }
-
-        const colors = pointData.getScalars();
-        if (!colors) {
-            console.log('No colors found');
-            return;
-        }
-
-        // Calculate centroids for each area
-        const areaCentroids = new Map();
-        const areaColorMap = new Map();
-
-        // Group points by area
-        for (let i = 0; i < points.getNumberOfPoints(); i++) {
-            const point = points.getPoint(i);
-            const areaId = areaMap.get(i + 1); // Add 1 because IDs start at 1 in the text file
-            
-            if (!areaId) continue;
-
-            if (!areaCentroids.has(areaId)) {
-                areaCentroids.set(areaId, []);
-                const color = colors.getTuple(i);
-                areaColorMap.set(areaId, color);
-            }
-            areaCentroids.get(areaId).push(point);
-        }
-
-        // Calculate average position for each area
-        const labelPoints = [];
-        areaCentroids.forEach((points, areaId) => {
-            // Calculate the bounding box for this area
-            let minX = Infinity, minY = Infinity, minZ = Infinity;
-            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-            
-            points.forEach(point => {
-                minX = Math.min(minX, point[0]);
-                minY = Math.min(minY, point[1]);
-                minZ = Math.min(minZ, point[2]);
-                maxX = Math.max(maxX, point[0]);
-                maxY = Math.max(maxY, point[1]);
-                maxZ = Math.max(maxZ, point[2]);
-            });
-
-            // Use the center of the bounding box as the label position
-            const centroid = [
-                (minX + maxX) / 2,
-                (minY + maxY) / 2,
-                (minZ + maxZ) / 2
-            ];
-
-            labelPoints.push({ 
-                centroid, 
-                label: areaId, 
-                color: areaColorMap.get(areaId),
-                bounds: { minX, minY, minZ, maxX, maxY, maxZ }
-            });
+      // Calculate average position for each area
+      const labelPoints = [];
+      areaCentroids.forEach((points, areaId) => {
+        // Calculate the bounding box for this area
+        let minX = Infinity, minY = Infinity, minZ = Infinity;
+        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        
+        points.forEach(point => {
+          minX = Math.min(minX, point[0]);
+          minY = Math.min(minY, point[1]);
+          minZ = Math.min(minZ, point[2]);
+          maxX = Math.max(maxX, point[0]);
+          maxY = Math.max(maxY, point[1]);
+          maxZ = Math.max(maxZ, point[2]);
         });
 
-        // Sort label points by depth (Z coordinate) to handle overlapping
-        labelPoints.sort((a, b) => b.centroid[2] - a.centroid[2]);
+        // Use the center of the bounding box as the label position
+        const centroid = [
+          (minX + maxX) / 2,
+          (minY + maxY) / 2,
+          (minZ + maxZ) / 2
+        ];
 
-        // Create polydata for the label positions
-        const labelPolyData = vtk({
-            vtkClass: 'vtkPolyData',
-            points: {
-                vtkClass: 'vtkPoints',
-                dataType: 'Float32Array',
-                numberOfComponents: 3,
-                values: labelPoints.flatMap(lp => lp.centroid),
-            },
-            polys: {
-                vtkClass: 'vtkCellArray',
-                dataType: 'Uint16Array',
-                values: labelPoints.map((_, i) => [1, i]).flat(),
-            },
+        labelPoints.push({ 
+          centroid, 
+          label: areaId, 
+          color: state.simulationType === SIMULATION_TYPES.NO_NETWORK ? areaColorMap.get(areaId) : [255, 255, 255],  // White for calcium and stimulus
+          bounds: { minX, minY, minZ, maxX, maxY, maxZ }
         });
+      });
 
-        // Create the mapper and set its input directly
-        psMapper.setInputData(labelPolyData);
+      // Sort label points by depth (Z coordinate) to handle overlapping
+      labelPoints.sort((a, b) => b.centroid[2] - a.centroid[2]);
 
-        // Create the callback to render labels
-        psMapper.setCallback((coordsList, camera, aspect, depthBuffer) => {
-            if (!labelCanvas.current || !labelContext.current) return;
+      // Create polydata for the label positions
+      const labelPolyData = vtk({
+        vtkClass: 'vtkPolyData',
+        points: {
+          vtkClass: 'vtkPoints',
+          dataType: 'Float32Array',
+          numberOfComponents: 3,
+          values: labelPoints.flatMap(lp => lp.centroid),
+        },
+        polys: {
+          vtkClass: 'vtkCellArray',
+          dataType: 'Uint16Array',
+          values: labelPoints.map((_, i) => [1, i]).flat(),
+        },
+      });
 
-            const ctx = labelContext.current;
-            const canvasWidth = labelCanvas.current.width;
-            const canvasHeight = labelCanvas.current.height;
+      // Create the mapper and set its input directly
+      psMapper.setInputData(labelPolyData);
 
-            // Clear previous labels
-            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+      // Create the callback to render labels
+      psMapper.setCallback((coordsList, camera, aspect, depthBuffer) => {
+        if (!labelCanvas.current || !labelContext.current) return;
 
-            // Reset label positions
-            labelPositions.current.clear();
+        const ctx = labelContext.current;
+        const canvasWidth = labelCanvas.current.width;
+        const canvasHeight = labelCanvas.current.height;
 
-            coordsList.forEach((xy, idx) => {
-                const { label, color, centroid } = labelPoints[idx];
+        // Clear previous labels
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-                // Calculate relative positions (0 to 1) from the center
-                const relX = (xy[0] / canvasWidth) - 0.5;
-                const relY = (xy[1] / canvasHeight) - 0.5;
+        // Reset label positions
+        labelPositions.current.clear();
 
-                // Apply scaling and offset to relative positions
-                const scale = 0.6;
-                const xOffset = -0.30;
-                const yOffset = -0.32;
+        coordsList.forEach((xy, idx) => {
+          const { label, color } = labelPoints[idx];
 
-                // Convert back to pixel coordinates
-                const x = (relX * scale + 0.5 + xOffset) * canvasWidth;
-                const y = canvasHeight - ((relY * scale + 0.5 + yOffset) * canvasHeight);
+          // Calculate relative positions (0 to 1) from the center
+          const relX = (xy[0] / canvasWidth) - 0.5;
+          const relY = (xy[1] / canvasHeight) - 0.5;
 
-                // Format label
-                const areaNumber = label.split('_')[1];
-                const brodmannLabel = `BA ${areaNumber}`;
+          // Apply scaling and offset to relative positions
+          const scale = 0.6;
+          const xOffset = -0.30;
+          const yOffset = -0.32;
 
-                // Draw shadow/outline
-                ctx.font = 'bold 14px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-                ctx.lineWidth = 3;
-                ctx.strokeText(brodmannLabel, x, y);
+          // Convert back to pixel coordinates
+          const x = (relX * scale + 0.5 + xOffset) * canvasWidth;
+          const y = canvasHeight - ((relY * scale + 0.5 + yOffset) * canvasHeight);
 
-                // Always use white text for calcium mode
-                ctx.fillStyle = state.simulationType === SIMULATION_TYPES.CALCIUM 
-                    ? 'rgb(255, 255, 255)' 
-                    : `rgb(${Math.round(color[0] * 255)}, ${Math.round(color[1] * 255)}, ${Math.round(color[2] * 255)})`;
-                ctx.fillText(brodmannLabel, x, y);
+          // Format label
+          const areaNumber = label.split('_')[1];
+          const brodmannLabel = `BA ${areaNumber}`;
 
-                // Store label position with the full label ID
-                labelPositions.current.set(`${x},${y}`, {
-                    label: label,  // The full area_XX format
-                    brodmannArea: brodmannLabel,
-                    color,
-                    bounds: centroid,
-                    // Add calcium difference if in calcium mode
-                    ...(state.simulationType === SIMULATION_TYPES.CALCIUM && {
-                        calciumDiff: calciumViz?.areaData.get(label)?.difference,
-                        currentLevel: calciumViz?.areaData.get(label)?.currentLevel,
-                        targetLevel: calciumViz?.areaData.get(label)?.targetLevel
-                    })
-                });
-                
-                console.log('Stored label position for:', label); // Add this log
-            });
+          // Draw shadow/outline
+          ctx.font = 'bold 14px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+          ctx.lineWidth = 3;
+          ctx.strokeText(brodmannLabel, x, y);
+
+          // Use white for calcium and stimulus modes, original colors for no-network mode
+          ctx.fillStyle = state.simulationType === SIMULATION_TYPES.NO_NETWORK
+            ? `rgb(${Math.round(color[0] * 255)}, ${Math.round(color[1] * 255)}, ${Math.round(color[2] * 255)})`
+            : 'rgb(255, 255, 255)';
+          ctx.fillText(brodmannLabel, x, y);
+
+          // Store label position
+          labelPositions.current.set(`${x},${y}`, {
+            label: label,
+            brodmannArea: brodmannLabel,
+            color,
+            bounds: labelPoints[idx].bounds
+          });
         });
+      });
 
-        // Add actor to renderer
-        context.current.renderer.addActor(actor);
-        setLabelActor(actor);
-        context.current.renderWindow.render();
+      // Add actor to renderer
+      context.current.renderer.addActor(actor);
+      setLabelActor(actor);
+      context.current.renderWindow.render();
+
     } catch (error) {
-        console.error('Error creating labels:', error);
+      console.error('Error creating labels:', error);
     }
-  }, [state.simulationType]);
+  }, [labelActor, state.simulationType]);
 
   // Add this effect to handle label visibility
   useEffect(() => {
     if (!isInitialized || !context.current.readers.get('neurons')) return;
 
     if (showLabels && !labelActor) {
-        console.log('Creating labels...');
-        createLabels().catch(error => {
-            console.error('Error in label creation:', error);
-        });
+      console.log('Creating labels...');
+      createLabels().catch(error => {
+        console.error('Error in label creation:', error);
+      });
     } else if (!showLabels && labelActor) {
-        console.log('Removing labels...');
-        context.current.renderer.removeActor(labelActor);
-        labelActor.delete();
-        setLabelActor(null);
-        if (labelContext.current) {
-            labelContext.current.clearRect(
-                0, 
-                0, 
-                labelCanvas.current.width, 
-                labelCanvas.current.height
-            );
-        }
-        context.current.renderWindow.render();
+      console.log('Removing labels...');
+      context.current.renderer.removeActor(labelActor);
+      labelActor.delete();
+      setLabelActor(null);
+      if (labelContext.current) {
+        labelContext.current.clearRect(
+          0, 
+          0, 
+          labelCanvas.current.width, 
+          labelCanvas.current.height
+        );
+      }
+      context.current.renderWindow.render();
     }
   }, [showLabels, isInitialized, createLabels, labelActor, state.neurons.fileUrl]);
 
   const fetchAreaLabels = async () => {
     try {
-        const response = await fetch(`http://localhost:5000/files/info/area-info.txt`);
-        const text = await response.text();
+      const response = await fetch(`http://localhost:5000/files/info/area-info.txt`);
+      const text = await response.text();
+      
+      // Parse the text file
+      const areaMap = new Map();
+      text.split('\n').forEach(line => {
+        if (line.startsWith('#') || !line.trim()) return;
         
-        // Parse the text file
-        const areaMap = new Map();
-        text.split('\n').forEach(line => {
-            if (line.startsWith('#') || !line.trim()) return;
-            
-            const [id, x, y, z, area] = line.trim().split(/\s+/);
-            if (area?.startsWith('area_')) {
-                areaMap.set(parseInt(id), area);
-            }
-        });
-        
-        return areaMap;
+        const [id, x, y, z, area] = line.trim().split(/\s+/);
+        if (area?.startsWith('area_')) {
+          areaMap.set(parseInt(id), area);
+        }
+      });
+      
+      return areaMap;
     } catch (error) {
-        console.error('Error loading area labels:', error);
-        return null;
+      console.error('Error loading area labels:', error);
+      return null;
     }
   };
 
@@ -962,18 +972,18 @@ const VTPViewer = () => {
 
     // Check if click is near any label (within 20 pixels)
     labelPositions.current.forEach((labelInfo, pos) => {
-        const [labelX, labelY] = pos.split(',').map(Number);
-        const distance = Math.sqrt(
-            Math.pow(x - labelX, 2) + 
-            Math.pow(y - labelY, 2)
-        );
+      const [labelX, labelY] = pos.split(',').map(Number);
+      const distance = Math.sqrt(
+        Math.pow(x - labelX, 2) + 
+        Math.pow(y - labelY, 2)
+      );
 
-        if (distance < 20) {
-            // Handle label click - you can show more information, highlight the area, etc.
-            console.log('Clicked label:', labelInfo);
-            // Optional: Highlight the corresponding area
-            highlightArea(labelInfo.bounds);
-        }
+      if (distance < 20) {
+        // Handle label click - you can show more information, highlight the area, etc.
+        console.log('Clicked label:', labelInfo);
+        // Optional: Highlight the corresponding area
+        highlightArea(labelInfo.bounds);
+      }
     });
   }, [showLabels]);
 
@@ -983,9 +993,9 @@ const VTPViewer = () => {
     
     labelCanvas.current.addEventListener('click', handleCanvasClick);
     return () => {
-        if (labelCanvas.current) {
-            labelCanvas.current.removeEventListener('click', handleCanvasClick);
-        }
+      if (labelCanvas.current) {
+        labelCanvas.current.removeEventListener('click', handleCanvasClick);
+      }
     };
   }, [handleCanvasClick]);
 
@@ -1075,8 +1085,8 @@ const VTPViewer = () => {
   // Add this function to handle mouse movement
   const handleMouseMove = useCallback((event) => {
     if (!labelCanvas.current || !showLabels) {
-        setTooltipInfo(null);
-        return;
+      setTooltipInfo(null);
+      return;
     }
 
     const rect = labelCanvas.current.getBoundingClientRect();
@@ -1085,41 +1095,60 @@ const VTPViewer = () => {
 
     let foundLabel = false;
     labelPositions.current.forEach((labelInfo, pos) => {
-        const [labelX, labelY] = pos.split(',').map(Number);
-        const distance = Math.sqrt(
-            Math.pow(x - labelX, 2) + 
-            Math.pow(y - labelY, 2)
-        );
+      const [labelX, labelY] = pos.split(',').map(Number);
+      const distance = Math.sqrt(
+        Math.pow(x - labelX, 2) + 
+        Math.pow(y - labelY, 2)
+      );
 
-        if (distance < 20) {
-            foundLabel = true;
-            const areaId = labelInfo.label;  // Use the original area_XX format
-            const brodmannId = areaId.replace('area_', 'BA_');
-            const areaInfo = brodmannInfo.get(brodmannId);
-            
-            if (areaInfo) {
-                const areaData = calciumViz?.areaData.get(areaId);
-                setTooltipInfo({
-                    ...labelInfo,
-                    name: areaInfo.name,
-                    description: areaInfo.description,
-                    ...(state.simulationType === SIMULATION_TYPES.CALCIUM && {
-                        calciumDiff: areaData 
-                            ? `Calcium difference from target: ${(areaData.difference * 100).toFixed(4)}%`
-                            : 'No calcium data available, data infered from surrounding areas.',
-                        ...(areaData && {
-                            details: `Current: ${areaData.currentLevel.toFixed(4)}, Target: ${areaData.targetLevel.toFixed(4)}`
-                        })
-                    })
-                });
-            }
+      if (distance < 20) {
+        foundLabel = true;
+        const areaId = labelInfo.label;  // Use the original area_XX format
+        const brodmannId = areaId.replace('area_', 'BA_');
+        const areaInfo = brodmannInfo.get(brodmannId);
+        
+        if (areaInfo) {
+          if (state.simulationType === SIMULATION_TYPES.CALCIUM) {
+            const areaData = calciumViz?.areaData.get(areaId);
+            setTooltipInfo({
+              ...labelInfo,
+              name: areaInfo.name,
+              description: areaInfo.description,
+              calciumDiff: areaData 
+                ? `Calcium difference from target: ${(areaData.difference * 100).toFixed(4)}%`
+                : 'No calcium data available',
+              ...(areaData && {
+                details: `Current: ${areaData.currentLevel.toFixed(4)}, Target: ${areaData.targetLevel.toFixed(4)}`
+              })
+            });
+          } else if (state.simulationType === SIMULATION_TYPES.STIMULUS) {
+            const areaData = stimulusViz?.areaData.get(areaId);
+            setTooltipInfo({
+              ...labelInfo,
+              name: areaInfo.name,
+              description: areaInfo.description,
+              activityInfo: areaData 
+                ? `Membrane potential: ${areaData.activityLevel.toFixed(2)} mV`
+                : 'No activity data available',
+              ...(areaData?.isStimulated && {
+                stimulationStatus: 'Currently under stimulation'
+              })
+            });
+          } else {
+            setTooltipInfo({
+              ...labelInfo,
+              name: areaInfo.name,
+              description: areaInfo.description
+            });
+          }
         }
+      }
     });
 
     if (!foundLabel) {
-        setTooltipInfo(null);
+      setTooltipInfo(null);
     }
-  }, [showLabels, brodmannInfo, state.simulationType, calciumViz]);
+  }, [showLabels, brodmannInfo, state.simulationType, calciumViz, stimulusViz]);
 
   // Add this effect to handle mouse movement
   useEffect(() => {
@@ -1495,7 +1524,7 @@ const VTPViewer = () => {
         ];
 
         camera.setPosition(...newPosition);
-        camera.setFocalPoint(...center);  // Use the center from closure
+        camera.setFocalPoint(...center);
         context.current.renderer.resetCameraClippingRange();
         context.current.renderWindow.render();
 
@@ -1504,15 +1533,7 @@ const VTPViewer = () => {
         }
       };
 
-      // Start animation
-      animationFrameId = requestAnimationFrame(animate);
-
-      // Cleanup function
-      return () => {
-        if (animationFrameId) {
-          cancelAnimationFrame(animationFrameId);
-        }
-      };
+      animate();
 
     } catch (error) {
       console.error('Error focusing on highest difference:', error);
@@ -1613,6 +1634,338 @@ const VTPViewer = () => {
     }
   };
 
+  // Add this effect to load stimulus data
+  useEffect(() => {
+    const loadStimulusData = async () => {
+      if (state.simulationType !== SIMULATION_TYPES.STIMULUS) return;
+      
+      try {
+        const response = await fetch('http://localhost:5000/files/stimulus/stimulus_data.json');
+        const data = await response.json();
+        setStimulusData(data);
+        
+        if (context.current.actors.get('neurons')) {
+          setTimeout(() => updateStimulusVisualization(), 0);
+        }
+      } catch (error) {
+        console.error('Error loading stimulus data:', error);
+      }
+    };
+
+    loadStimulusData();
+  }, [state.simulationType]);
+
+  // Add this effect to handle the flashing animation
+  useEffect(() => {
+    if (state.simulationType !== SIMULATION_TYPES.STIMULUS) return;
+    
+    const flashInterval = setInterval(() => {
+      setFlashPhase(prev => (prev + 1) % 100);  // 0-99 for smooth animation
+    }, 16); // ~60fps
+    
+    return () => clearInterval(flashInterval);
+  }, [state.simulationType]);
+
+  // Add this function to update stimulated neurons (put it before updateStimulusVisualization)
+  const updateStimulatedNeurons = useCallback((areaMapping, stimulusViz) => {
+    const newStimulatedNeurons = new Set();
+    
+    // Get currently stimulated areas
+    const stimulatedAreas = new Set();
+    stimulusViz?.areaData?.forEach((data, areaId) => {
+      if (data.isStimulated) {
+        stimulatedAreas.add(areaId);
+      }
+    });
+
+    // Map neurons to their areas and check if they're in stimulated areas
+    areaMapping.forEach((areaId, neuronId) => {
+      if (stimulatedAreas.has(areaId)) {
+        newStimulatedNeurons.add(neuronId);
+      }
+    });
+
+    setStimulatedNeurons(newStimulatedNeurons);
+    return newStimulatedNeurons;
+  }, []);
+
+  // Modify the updateStimulusVisualization function
+  const updateStimulusVisualization = useCallback(async () => {
+    if (!isInitialized || !stimulusData || !stimulusViz) return;
+
+    const neuronsReader = context.current.readers.get('neurons');
+    const neuronsMapper = context.current.mappers.get('neurons');
+    if (!neuronsReader || !neuronsMapper) {
+      console.warn('Required VTK objects not available');
+      return;
+    }
+
+    try {
+      // Load and process area mapping
+      const areaMapping = new Map();
+      const response = await fetch('http://localhost:5000/files/info/area-info.txt');
+      const text = await response.text();
+      
+      text.split('\n').forEach(line => {
+        if (!line.startsWith('#') && line.trim()) {
+          const [id, , , , area] = line.trim().split(/\s+/);
+          if (area?.startsWith('area_')) {
+            areaMapping.set(parseInt(id), area);
+          }
+        }
+      });
+
+      const polyData = neuronsReader.getOutputData(0);
+      const points = polyData.getPoints();
+      const numPoints = points.getNumberOfPoints();
+
+      // Create array for activity levels
+      const activityLevels = new Float32Array(numPoints);
+      
+      // Process all points
+      for (let i = 0; i < numPoints; i++) {
+        const neuronId = i + 1;
+        const areaId = areaMapping.get(neuronId);
+        const areaInfo = stimulusViz.areaData.get(areaId);
+        
+        const activity = areaInfo?.activityLevel ?? -65;
+        const normalized = (activity - FIXED_MIN) / (FIXED_MAX - FIXED_MIN);
+        activityLevels[i] = Math.max(0, Math.min(1, normalized));
+      }
+
+      // Create and configure VTK scalar array
+      const activityArray = vtk({
+        vtkClass: 'vtkDataArray',
+        name: 'activity_levels',
+        numberOfComponents: 1,
+        values: activityLevels
+      });
+
+      // Update polydata with scalar array
+      polyData.getPointData().setScalars(activityArray);
+
+      // Configure color mapping
+      const lut = vtkColorTransferFunction.newInstance();
+      context.current.lookupTables.set('stimulus', lut);
+
+      // Cool to warm colormap
+      lut.addRGBPoint(0.0, 0.0, 0.0, 0.4);        // Dark blue
+      lut.addRGBPoint(0.2, 0.0, 0.3, 0.8);        // Blue
+      lut.addRGBPoint(0.4, 0.2, 0.6, 0.9);        // Light blue
+      lut.addRGBPoint(0.6, 0.9, 0.6, 0.2);        // Light orange
+      lut.addRGBPoint(0.8, 0.9, 0.3, 0.0);        // Orange
+      lut.addRGBPoint(1.0, 0.8, 0.0, 0.0);        // Red
+
+      // Configure mapper
+      neuronsMapper.setInputData(polyData);
+      neuronsMapper.setScalarVisibility(true);
+      neuronsMapper.setLookupTable(lut);
+      neuronsMapper.setScalarRange(0, 1);
+
+      // Configure actor properties with flashing for stimulated areas
+      const actor = context.current.actors.get('neurons');
+      if (actor) {
+        const property = actor.getProperty();
+        property.setAmbient(0.3);
+        property.setDiffuse(0.7);
+
+        // Calculate flash intensity
+        const flashIntensity = Math.abs(Math.sin(flashPhase * Math.PI / 50));
+        const basePointSize = state.neurons.options.pointSize;
+
+        // Check if any area is currently stimulated
+        const stimulatedAreas = new Set();
+        stimulusViz.areaData.forEach((data, areaId) => {
+          if (data.isStimulated) {
+            stimulatedAreas.add(areaId);
+          }
+        });
+
+        // Only flash if we have stimulated areas
+        if (stimulatedAreas.size > 0) {
+          // Get the area ID for the current point
+          const currentAreaId = areaMapping.get(1); // Use first point to check area
+          if (stimulatedAreas.has(currentAreaId)) {
+            // Increase point size for stimulated areas
+            const flashSize = basePointSize * (1 + flashIntensity * 0.5);
+            property.setPointSize(flashSize);
+            
+            // Add white highlight
+            property.setAmbientColor(
+              1.0 - flashIntensity * 0.5,  // R
+              1.0 - flashIntensity * 0.5,  // G
+              1.0 - flashIntensity * 0.5   // B
+            );
+          } else {
+            // Reset to normal size and color for non-stimulated areas
+            property.setPointSize(basePointSize);
+            property.setAmbientColor(1.0, 1.0, 1.0);
+          }
+        } else {
+          // No stimulated areas, use normal size
+          property.setPointSize(basePointSize);
+          property.setAmbientColor(1.0, 1.0, 1.0);
+        }
+      }
+
+      // Trigger updates
+      polyData.modified();
+      neuronsMapper.modified();
+      context.current.renderWindow.render();
+
+    } catch (error) {
+      console.error('Error updating stimulus visualization:', error);
+    }
+  }, [isInitialized, stimulusData, state.simulationType, state.currentTimestep, stimulusViz, state.neurons.options.pointSize, flashPhase]);
+
+  // Helper function to check if any area is currently being stimulated
+  const getCurrentStimulatedArea = (stimulusViz) => {
+    if (!stimulusViz?.areaData) return null;
+    
+    for (const [areaId, data] of stimulusViz.areaData.entries()) {
+      if (data.isStimulated) {
+        return areaId;
+      }
+    }
+    return null;
+  };
+
+  // Add this effect to update visualization when timestep changes
+  useEffect(() => {
+    if (state.simulationType === SIMULATION_TYPES.STIMULUS) {
+      updateStimulusVisualization();
+    }
+  }, [updateStimulusVisualization, state.currentTimestep]);
+
+  // Update the focusHighestActivity function to match focusHighestDifference's implementation
+  const focusHighestActivity = useCallback(async () => {
+    if (!isInitialized || !stimulusViz || !context.current.renderer) return;
+
+    try {
+      // Find area with highest activity
+      let maxActivity = -Infinity;  // Changed from 0 since we're dealing with negative values
+      let maxActivityAreaId = null;
+      stimulusViz.areaData.forEach((data, areaId) => {
+        if (data.activityLevel > maxActivity) {  // Higher (less negative) values mean more activity
+          maxActivity = data.activityLevel;
+          maxActivityAreaId = areaId;
+        }
+      });
+
+      if (!maxActivityAreaId) {
+        console.warn('No area with activity found');
+        return;
+      }
+
+      // Get all the points data
+      const neuronsReader = context.current.readers.get('neurons');
+      const polyData = neuronsReader.getOutputData(0);
+      const points = polyData.getPoints();
+      const areaPoints = [];
+
+      // Get the center of the brain
+      const bounds = polyData.getBounds();
+      const center = [
+        (bounds[0] + bounds[1]) / 2,
+        (bounds[2] + bounds[3]) / 2,
+        (bounds[4] + bounds[5]) / 2
+      ];
+
+      // Load area mapping
+      const response = await fetch('http://localhost:5000/files/info/area-info.txt');
+      const text = await response.text();
+      const areaMapping = new Map();
+      
+      text.split('\n').forEach(line => {
+        if (!line.startsWith('#') && line.trim()) {
+          const [id, , , , area] = line.trim().split(/\s+/);
+          if (area?.startsWith('area_')) {
+            areaMapping.set(parseInt(id), area);
+          }
+        }
+      });
+
+      // Collect points for target area
+      for (let i = 0; i < points.getNumberOfPoints(); i++) {
+        const neuronId = i + 1;
+        const areaId = areaMapping.get(neuronId);
+        if (areaId === maxActivityAreaId) {
+          areaPoints.push(points.getPoint(i));
+        }
+      }
+
+      if (areaPoints.length === 0) {
+        console.warn('No points found for target area');
+        return;
+      }
+
+      // Calculate target point (centroid of area)
+      const targetPoint = areaPoints.reduce(
+        (acc, point) => [
+          acc[0] + point[0], 
+          acc[1] + point[1], 
+          acc[2] + point[2]
+        ],
+        [0, 0, 0]
+      ).map(coord => coord / areaPoints.length);
+
+      // Get camera initial state
+      const camera = context.current.renderer.getActiveCamera();
+      const initialPosition = camera.getPosition();
+      const distance = camera.getDistance();
+
+      // Calculate direction from center to target point
+      const direction = [
+        targetPoint[0] - center[0],
+        targetPoint[1] - center[1],
+        targetPoint[2] - center[2]
+      ];
+      const length = Math.sqrt(direction[0]**2 + direction[1]**2 + direction[2]**2);
+
+      // Calculate target camera position
+      const targetPosition = [
+        center[0] + (direction[0] / length) * distance,
+        center[1] + (direction[1] / length) * distance,
+        center[2] + (direction[2] / length) * distance
+      ];
+
+      // Animation setup
+      const animationDuration = 2000;
+      const startTime = Date.now();
+
+      const animate = () => {
+        const now = Date.now();
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / animationDuration, 1);
+        
+        const easeT = t < 0.5 
+          ? 4 * t * t * t 
+          : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+        // Interpolate position
+        const newPosition = [
+          initialPosition[0] + (targetPosition[0] - initialPosition[0]) * easeT,
+          initialPosition[1] + (targetPosition[1] - initialPosition[1]) * easeT,
+          initialPosition[2] + (targetPosition[2] - initialPosition[2]) * easeT
+        ];
+
+        camera.setPosition(...newPosition);
+        camera.setFocalPoint(...center);
+        context.current.renderer.resetCameraClippingRange();
+        context.current.renderWindow.render();
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+
+      animate();
+
+    } catch (error) {
+      console.error('Error focusing on highest activity:', error);
+    }
+  }, [isInitialized, stimulusViz]);
+
   return (
     <ViewerContainer>
       <VTKContainer ref={vtkContainerRef} sx={{ visibility: isInitialized ? 'visible' : 'hidden' }} />
@@ -1657,6 +2010,22 @@ const VTPViewer = () => {
             }}
           >
             Turn to Area of Maximum Calcium Gradient
+          </Button>
+        )}
+        {state.simulationType === SIMULATION_TYPES.STIMULUS && (
+          <Button 
+            variant="contained" 
+            onClick={() => focusHighestActivity().catch(console.error)} 
+            sx={{ 
+              width: '100%',
+              background: theme.palette.gradients.red,
+              '&:hover': {
+                background: theme.palette.gradients.red,
+                filter: 'brightness(0.9)'
+              }
+            }}
+          >
+            Turn to Area of Maximum Activity
           </Button>
         )}
       </Box>
@@ -1722,6 +2091,53 @@ const VTPViewer = () => {
           <Typography variant="caption" sx={{ color: 'white', textAlign: 'center' }}>
             Each color represents a different Brodmann area
           </Typography>
+        </ColorLegend>
+      )}
+      {state.simulationType === SIMULATION_TYPES.STIMULUS && stimulusData && (
+        <ColorLegend sx={{ backgroundColor: 'transparent' }}>
+          <Typography variant="subtitle2" sx={{ color: 'white', mb: 1 }}>
+            Neural Activity Level
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ 
+              width: '180px',
+              height: '20px',
+              background: 'linear-gradient(90deg, #000066, #0044CC, #3399FF, #FFAA44, #FF5500, #CC0000)',
+              borderRadius: '2px',
+              mb: 0.5
+            }} />
+            <Box sx={{ 
+              display: 'flex', 
+              justifyContent: 'space-between',
+              width: '180px',
+              color: 'white',
+              fontSize: '0.75rem'
+            }}>
+              <span>-70</span>
+              <span>-60</span>
+              <span>-50</span>
+              <span>-40</span>
+              <span>-30</span>
+            </Box>
+            <Typography variant="caption" sx={{ color: 'white', mt: 1, textAlign: 'center' }}>
+              Membrane potential (mV)
+            </Typography>
+            {stimulusViz?.areaData?.get('area_8')?.isStimulated && (
+              <Typography variant="caption" sx={{ color: '#FF5500', mt: 0.5, fontWeight: 'bold' }}>
+                Area 8 under stimulation
+              </Typography>
+            )}
+            {stimulusViz?.areaData?.get('area_30')?.isStimulated && (
+              <Typography variant="caption" sx={{ color: '#FF5500', mt: 0.5, fontWeight: 'bold' }}>
+                Area 30 under stimulation
+              </Typography>
+            )}
+            {stimulusViz?.areaData?.get('area_34')?.isStimulated && (
+              <Typography variant="caption" sx={{ color: '#FF5500', mt: 0.5, fontWeight: 'bold' }}>
+                Area 34 under stimulation
+              </Typography>
+            )}
+          </Box>
         </ColorLegend>
       )}
     </ViewerContainer>

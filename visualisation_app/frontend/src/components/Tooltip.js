@@ -30,27 +30,67 @@ const Tooltip = ({ info }) => {
   return (
     <TooltipContainer>
       <Typography 
-        variant="subtitle1" 
+        variant="h6" 
         sx={{ 
-          fontWeight: 'bold',
-          color: theme.palette.primary.main  // Use theme color for title
+          mb: 1,
+          color: 'white'
         }}
       >
-        {info.brodmannArea}
+        {info.name || info.label}
       </Typography>
-      {info.name && (
-        <Typography variant="body2">
-          {info.name}
+      {info.description && (
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            mb: 1,
+            color: 'rgba(255, 255, 255, 0.9)'
+          }}
+        >
+          {info.description}
         </Typography>
       )}
       {info.calciumDiff && (
-        <Typography variant="body2" sx={{ color: 'lightgreen' }}>
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            fontWeight: 'bold',
+            color: theme.palette.primary.light
+          }}
+        >
           {info.calciumDiff}
         </Typography>
       )}
-      {info.description && (
-        <Typography variant="body2" sx={{ mt: 1, fontSize: '0.8rem' }}>
-          {info.description}
+      {info.details && (
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            color: 'rgba(255, 255, 255, 0.7)'
+          }}
+        >
+          {info.details}
+        </Typography>
+      )}
+      {info.activityInfo && (
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            fontWeight: 'bold',
+            color: '#FF6B6B'
+          }}
+        >
+          {info.activityInfo}
+        </Typography>
+      )}
+      {info.stimulationStatus && (
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            color: '#FF5500', 
+            fontWeight: 'bold',
+            mt: 0.5 
+          }}
+        >
+          {info.stimulationStatus}
         </Typography>
       )}
     </TooltipContainer>
