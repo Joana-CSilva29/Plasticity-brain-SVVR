@@ -96,7 +96,7 @@ def plot_combined_plots_refined(plasticity_data, neurons_data, output_file):
     )
 
     metrics = ["Creations", "Deletions", "Net Changes"]
-    y_labels = ["Number of Creations", "Number of Deletions", "Number of Net Changes"]
+    y_labels = ["Created synapses", "Deleted synapses", "Net Changes"]
 
     # Plasticity plots:
     # Creations: Row 1

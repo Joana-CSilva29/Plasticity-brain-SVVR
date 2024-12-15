@@ -17,11 +17,11 @@ def read_csv_safely(file_path):
         "background_input", "grown_axons", "connected_axons", 
         "grown_dendrites", "connected_dendrites"
     ]
-    
+
     try:
         df = pd.read_csv(file_path, delimiter=';', header=None, names=column_names, engine='python')
         df['step'] = df['step'].astype(int)
-        df['global_step'] = df.index  # Add global step as row index
+        df['global_step'] = df.index * 100
 
         return df
     except Exception as e:
@@ -52,7 +52,6 @@ def extract_neuron_properties(data_dir, target_step, neuron_area_map):
     # Use tqdm to create a progress bar for the loop
     for neuron_id, area in tqdm(neuron_area_map.items(), desc="Processing Neurons", unit="neuron"):
         file_path = os.path.join(data_dir, f"0_{neuron_id}.csv")
-
         if not os.path.exists(file_path):
             print(f"File not found: {file_path}")
             continue
@@ -98,7 +97,7 @@ def extract_neuron_properties(data_dir, target_step, neuron_area_map):
 
 
 
-def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
+def plot_combined_parallel_and_box(neuron_df, target_step, simulation,output_dir="plots"):
     """
     Combines a box plot for Calcium levels by Area and a parallel coordinates plot for averages per Area
     with normalized column scales and interactive filtering using buttons.
@@ -239,7 +238,7 @@ def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
     ],
         annotations=[
             dict(
-                text=f"<b>Neuron Properties (Time step: {target_step})</b>",
+                text=f"<b>Neuron Properties @Time step {target_step}</b>",
                 x=0.5,
                 y=1.15,
                 xref="paper",
@@ -248,7 +247,7 @@ def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
                 font=dict(size=18, family="Arial")
             ),
             dict(
-                text=f"<b>Calcium Levels by Area (Time step: {target_step})</b>",
+                text=f"<b>Calcium Levels by Area @Time step {target_step}</b>",
                 x=0.5,
                 y=0.45,
                 xref="paper",
@@ -266,7 +265,7 @@ def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
 
 
     # Save the plot as an HTML file
-    output_file = os.path.join(output_dir, f"combined_box_and_parallel_step_{target_step}.html")
+    output_file = os.path.join(output_dir, f"Box_plot_{simulation}_step_{target_step}.html")
     combined_fig.write_html(output_file)
     print(f"Interactive Combined Plot saved to {output_file}")
 
@@ -275,9 +274,12 @@ def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
 
 
 # Main execution
-data_dir = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network/monitors'
-positions_file = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network/positions/rank_0_positions.txt'
-target_step = 700  # Change to your desired global step
+target_step = 999900
+simulation = 'no-network'
+data_dir = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simulation}/monitors_test'
+positions_file = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simulation}/positions/rank_0_positions.txt'
+
+# Change to your desired global step
 
 # Parse positions file to create neuron-to-area mapping
 neuron_area_map = parse_positions_file(positions_file)
@@ -285,5 +287,5 @@ neuron_area_map = parse_positions_file(positions_file)
 # Extract neuron properties as a DataFrame
 neuron_df = extract_neuron_properties(data_dir, target_step, neuron_area_map)
 
-plot_combined_parallel_and_box(neuron_df, target_step)
+plot_combined_parallel_and_box(neuron_df, target_step,simulation)
 
