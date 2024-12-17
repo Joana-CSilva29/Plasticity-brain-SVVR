@@ -1,3 +1,4 @@
+BA_0|Primary Somatosensory Cortex|Responsible for processing touch and proprioception
 BA_1|Primary Somatosensory Cortex|Responsible for processing touch and proprioception
 BA_2|Primary Somatosensory Cortex|Processes temperature, light touch, pressure and pain
 BA_3|Primary Somatosensory Cortex|Main area for processing sensory input from the body
@@ -9,6 +10,11 @@ BA_8|Frontal Eye Fields|Controls eye movements
 BA_9|Dorsolateral Prefrontal Cortex|Executive function, working memory
 BA_10|Anterior Prefrontal Cortex|Complex cognitive behavior, planning
 BA_11|Orbitofrontal Area|Decision making, emotional responses
+BA_12|Orbitofrontal Area|Decision making, emotional responses
+BA_13|Insular Cortex|Processes pain, emotional responses
+BA_14|Insular Cortex|Processes pain, emotional responses
+BA_15|Insular Cortex|Processes pain, emotional responses
+BA_16|Insular Cortex|Processes pain, emotional responses
 BA_17|Primary Visual Cortex|Processes basic visual information
 BA_18|Secondary Visual Cortex|More complex visual processing
 BA_19|Associative Visual Cortex|Complex visual processing

@@ -231,7 +231,7 @@ def process_simulation(sim_name, base_path):
     print(f"Processing simulation: {sim_name}")
     
     # Create output directory
-    base_output_dir = 'backend/uploads'
+    base_output_dir = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Plasticity-brain-SVVR/visualisation_app/backend/uploads'
     sim_dir = os.path.join(base_output_dir, sim_name)
     os.makedirs(sim_dir, exist_ok=True)
 
@@ -294,7 +294,7 @@ def create_empty_connections_polydata():
 
 
 def main():
-    base_ssd_path = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR'
+    base_ssd_path = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23'
     
     # Define simulation configurations
     simulations = {

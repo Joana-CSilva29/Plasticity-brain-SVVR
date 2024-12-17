@@ -61,11 +61,6 @@ def extract_neuron_properties(data_dir, target_step, neuron_area_map):
             print(f"No data found in file for Neuron {neuron_id}")
             continue
         
-        
-        # Debugging global_step availability
-        if target_step not in df['global_step'].values:
-            print(f"No data for Neuron {neuron_id} at global_step {target_step}")
-            continue
 
         # Filter for the target global step
         step_data = df[df['global_step'] == target_step]
@@ -274,9 +269,9 @@ def plot_combined_parallel_and_box(neuron_df, target_step, simulation,output_dir
 
 
 # Main execution
-target_step = 999900
+target_step = 100000
 simulation = 'no-network'
-data_dir = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simulation}/monitors_test'
+data_dir = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simulation}/monitors'
 positions_file = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simulation}/positions/rank_0_positions.txt'
 
 # Change to your desired global step
@@ -286,6 +281,6 @@ neuron_area_map = parse_positions_file(positions_file)
 
 # Extract neuron properties as a DataFrame
 neuron_df = extract_neuron_properties(data_dir, target_step, neuron_area_map)
-
+print(neuron_df.head(), neuron_df.tail())
 plot_combined_parallel_and_box(neuron_df, target_step,simulation)
 
