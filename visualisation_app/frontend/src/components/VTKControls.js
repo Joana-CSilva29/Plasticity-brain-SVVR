@@ -61,7 +61,7 @@ const VTKControls = ({ isLoading }) => {
         <Slider
           value={currentSource.options.opacity}
           onChange={(_, value) => handleUpdate('opacity', value)}
-          min={0}
+          min={0.1}
           max={1}
           step={0.1}
           valueLabelDisplay="auto"

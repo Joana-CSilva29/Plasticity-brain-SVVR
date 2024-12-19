@@ -33,7 +33,9 @@ const Tooltip = ({ info }) => {
         variant="h6" 
         sx={{ 
           mb: 1,
-          color: 'white'
+          color: 'white',
+          fontSize: '0.9rem',
+          fontWeight: 600
         }}
       >
         {info.name || info.label}
@@ -43,7 +45,8 @@ const Tooltip = ({ info }) => {
           variant="body2" 
           sx={{ 
             mb: 1,
-            color: 'rgba(255, 255, 255, 0.9)'
+            color: 'rgba(255, 255, 255, 0.9)',
+            fontSize: '0.75rem'
           }}
         >
           {info.description}
@@ -54,7 +57,8 @@ const Tooltip = ({ info }) => {
           variant="body2" 
           sx={{ 
             fontWeight: 'bold',
-            color: theme.palette.primary.light
+            color: theme.palette.primary.light,
+            fontSize: '0.75rem'
           }}
         >
           {info.calciumDiff}
@@ -64,7 +68,8 @@ const Tooltip = ({ info }) => {
         <Typography 
           variant="body2" 
           sx={{ 
-            color: 'rgba(255, 255, 255, 0.7)'
+            color: 'rgba(255, 255, 255, 0.7)',
+            fontSize: '0.75rem'
           }}
         >
           {info.details}
@@ -75,7 +80,8 @@ const Tooltip = ({ info }) => {
           variant="body2" 
           sx={{ 
             fontWeight: 'bold',
-            color: '#FF6B6B'
+            color: '#FF6B6B',
+            fontSize: '0.75rem'
           }}
         >
           {info.activityInfo}
@@ -87,7 +93,8 @@ const Tooltip = ({ info }) => {
           sx={{ 
             color: '#FF5500', 
             fontWeight: 'bold',
-            mt: 0.5 
+            mt: 0.5,
+            fontSize: '0.75rem'
           }}
         >
           {info.stimulationStatus}

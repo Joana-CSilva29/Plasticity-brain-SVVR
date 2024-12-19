@@ -11,7 +11,7 @@ import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/Orie
 import vtkAnnotatedCubeActor from '@kitware/vtk.js/Rendering/Core/AnnotatedCubeActor';
 import vtkTubeFilter from '@kitware/vtk.js/Filters/General/TubeFilter';
 import { styled, useTheme } from '@mui/material/styles';
-import { Box, Typography, CircularProgress, Button } from '@mui/material';
+import { Box, Typography, CircularProgress, Button, Select, MenuItem } from '@mui/material';
 import { useVTKState, useVTKDispatch } from '../context/VTKContext';
 import Tooltip from './Tooltip';
 import { SIMULATION_TYPES, VISUALIZATION_MODES } from '../context/VTKContext';
@@ -47,19 +47,19 @@ const VTKContainer = styled(Box)({
 
 const InfoOverlay = styled(Box)(({ theme }) => ({
   position: 'absolute',
-  top: theme.spacing(1),
-  left: '50%',
-  transform: 'translateX(-50%)',
+  top: '10px',
+  left: '10px',
   color: 'white',
   padding: theme.spacing(1),
   fontSize: '0.8rem',
   zIndex: 1,
   pointerEvents: 'none',
-  textAlign: 'center',
+  textAlign: 'left'
 }));
 
 const StyledTypography = styled(Typography)({
-  fontSize: '0.9rem',
+  fontSize: '0.8rem',
+  lineHeight: 1.5
 });
 
 const LoadingOverlay = styled(Box)({
@@ -79,9 +79,12 @@ const LoadingOverlay = styled(Box)({
 
 const ToggleButton = styled(Button)(({ theme, active }) => ({
   position: 'absolute',
-  top: '10px',
+  top: '70px',
   left: '10px',
   zIndex: 1,
+  padding: '4px 12px',
+  fontSize: '0.8rem',
+  minWidth: 'unset',
   backgroundColor: active ? theme.palette.primary.main : 'rgba(255, 255, 255, 0.05)',
   borderColor: active ? theme.palette.primary.main : 'rgba(255, 255, 255, 0.1)',
   '&:hover': {
@@ -237,6 +240,41 @@ const VTPViewer = () => {
   // Add the calcium visualization data at component level
   const calciumViz = useCalciumVisualization(calciumData, state.currentTimestep);
   const stimulusViz = useStimulusVisualization(stimulusData, state.currentTimestep);
+
+  // Add this near other state declarations
+  const [areaOptions, setAreaOptions] = useState([]);
+
+  // Add this effect to load and process the Brodmann areas
+  useEffect(() => {
+    const loadBrodmannAreas = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/files/info/brodmann-info.txt');
+        const text = await response.text();
+        
+        const areas = text.split('\n')
+          .filter(line => line.trim())
+          .map(line => {
+            const [id, name, description] = line.split('|');
+            return {
+              value: id.toLowerCase(), // Convert BA_1 to ba_1 to match area naming
+              label: `${id.replace('BA_', '')} - ${name}`,
+              description
+            };
+          })
+          .sort((a, b) => {
+            const numA = parseInt(a.value.replace('ba_', ''));
+            const numB = parseInt(b.value.replace('ba_', ''));
+            return numA - numB;
+          });
+        
+        setAreaOptions(areas);
+      } catch (error) {
+        console.error('Error loading Brodmann areas:', error);
+      }
+    };
+
+    loadBrodmannAreas();
+  }, []);
 
   const cleanupVTKObjects = useCallback(() => {
     // Always clean up readers, mappers, and lookup tables
@@ -1009,11 +1047,14 @@ const VTPViewer = () => {
     console.log('Highlighting area with bounds:', bounds);
   };
 
-  // Update the camera presets
+  // Update the camera presets object:
   const cameraPresets = {
-    front: { position: [100, 0, 0], up: [0, 0, 1] },    // Switched with right view
+    front: { position: [100, 0, 0], up: [0, 0, 1] },
+    back: { position: [-100, 0, 0], up: [0, 0, 1] },
     top: { position: [0, 0, 100], up: [0, 1, 0] },
-    right: { position: [0, -100, 0], up: [0, 0, 1] }    // Switched with front view
+    bottom: { position: [0, 0, -100], up: [0, -1, 0] },
+    right: { position: [0, -100, 0], up: [0, 0, 1] },
+    left: { position: [0, 100, 0], up: [0, 0, 1] }
   };
 
   // Update the setCameraPosition function
@@ -2225,85 +2266,299 @@ const VTPViewer = () => {
     }
   }, [isInitialized, disableViz]);
 
+  // First, create a common button style object
+  const turnToButtonStyle = {
+    width: '100%',
+    fontSize: '0.75rem',
+    padding: '4px 8px',
+    height: '32px',
+    lineHeight: 1,
+    textTransform: 'none',
+    borderRadius: 1,
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    backgroundColor: theme.palette.secondary.main,
+    '&:hover': {
+      backgroundColor: theme.palette.secondary.dark,
+    }
+  };
+
+  // Update the AreaSelect styling to ensure menu stays open
+  const AreaSelect = styled(Select)(({ theme }) => ({
+    height: '32px',
+    fontSize: '0.75rem',
+    color: 'white',
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    '.MuiSelect-select': {
+      padding: '4px 8px',
+    },
+    '.MuiOutlinedInput-notchedOutline': {
+      borderColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    '&:hover .MuiOutlinedInput-notchedOutline': {
+      borderColor: 'rgba(255, 255, 255, 0.2)',
+    },
+    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+      borderColor: theme.palette.secondary.main,
+    },
+    '.MuiSvgIcon-root': {
+      color: 'rgba(255, 255, 255, 0.7)',
+    },
+    '& .MuiSelect-select:focus': {
+      backgroundColor: 'transparent',
+    }
+  }));
+
+  // Update the MenuItem styling
+  const StyledMenuItem = styled(MenuItem)(({ theme }) => ({
+    fontSize: '0.75rem',
+    padding: '4px 8px',
+    '&.Mui-selected': {
+      backgroundColor: theme.palette.secondary.dark
+    },
+    '&:hover': {
+      backgroundColor: 'rgba(255, 255, 255, 0.1)'
+    }
+  }));
+
+  // Add state for area selection
+  const [selectedArea, setSelectedArea] = useState('');
+
+  // Add function to focus on specific area
+  const focusOnArea = useCallback(async (areaId) => {
+    if (!isInitialized || !context.current.renderer || !areaId) return;
+
+    try {
+      const neuronsReader = context.current.readers.get('neurons');
+      const polyData = neuronsReader.getOutputData(0);
+      const points = polyData.getPoints();
+      const areaPoints = [];
+
+      // Get the center of the brain
+      const bounds = polyData.getBounds();
+      const center = [
+        (bounds[0] + bounds[1]) / 2,
+        (bounds[2] + bounds[3]) / 2,
+        (bounds[4] + bounds[5]) / 2
+      ];
+
+      // Load area mapping
+      const response = await fetch('http://localhost:5000/files/info/area-info.txt');
+      const text = await response.text();
+      const areaMapping = new Map();
+      
+      text.split('\n').forEach(line => {
+        if (!line.startsWith('#') && line.trim()) {
+          const [id, , , , area] = line.trim().split(/\s+/);
+          if (area?.startsWith('area_')) {
+            areaMapping.set(parseInt(id), area);
+          }
+        }
+      });
+
+      // Convert BA_X format to area_X format
+      const targetAreaId = `area_${areaId.split('_')[1]}`;
+      console.log('Looking for area:', targetAreaId);
+
+      // Collect points for target area
+      for (let i = 0; i < points.getNumberOfPoints(); i++) {
+        const neuronId = i + 1;
+        const area = areaMapping.get(neuronId);
+        if (area === targetAreaId) {
+          areaPoints.push(points.getPoint(i));
+        }
+      }
+
+      if (areaPoints.length === 0) {
+        console.warn('No points found for target area:', targetAreaId);
+        return;
+      }
+
+      console.log(`Found ${areaPoints.length} points for area ${targetAreaId}`);
+
+      // Calculate target point (centroid of area)
+      const targetPoint = areaPoints.reduce(
+        (acc, point) => [
+          acc[0] + point[0], 
+          acc[1] + point[1], 
+          acc[2] + point[2]
+        ],
+        [0, 0, 0]
+      ).map(coord => coord / areaPoints.length);
+
+      // Get camera initial state
+      const camera = context.current.renderer.getActiveCamera();
+      const initialPosition = camera.getPosition();
+      const distance = camera.getDistance();
+
+      // Calculate direction from center to target point
+      const direction = [
+        targetPoint[0] - center[0],
+        targetPoint[1] - center[1],
+        targetPoint[2] - center[2]
+      ];
+      const length = Math.sqrt(direction[0]**2 + direction[1]**2 + direction[2]**2);
+
+      // Calculate target camera position
+      const targetPosition = [
+        center[0] + (direction[0] / length) * distance,
+        center[1] + (direction[1] / length) * distance,
+        center[2] + (direction[2] / length) * distance
+      ];
+
+      // Animation setup
+      const animationDuration = 2000;
+      const startTime = Date.now();
+
+      const animate = () => {
+        const now = Date.now();
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / animationDuration, 1);
+        
+        const easeT = t < 0.5 
+          ? 4 * t * t * t 
+          : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+        // Interpolate position
+        const newPosition = [
+          initialPosition[0] + (targetPosition[0] - initialPosition[0]) * easeT,
+          initialPosition[1] + (targetPosition[1] - initialPosition[1]) * easeT,
+          initialPosition[2] + (targetPosition[2] - initialPosition[2]) * easeT
+        ];
+
+        camera.setPosition(...newPosition);
+        camera.setFocalPoint(...targetPoint); // Focus on area center instead of brain center
+        context.current.renderer.resetCameraClippingRange();
+        context.current.renderWindow.render();
+
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+
+      animate();
+
+    } catch (error) {
+      console.error('Error focusing on area:', error);
+    }
+  }, [isInitialized]);
+
+  // Then in the return statement, update the buttons and add dropdown:
+  {state.simulationType === SIMULATION_TYPES.CALCIUM && (
+    <>
+      <Button 
+        variant="contained" 
+        onClick={() => focusHighestDifference().catch(console.error)} 
+        sx={turnToButtonStyle}
+      >
+        Turn to Max Calcium
+      </Button>
+      <AreaSelect
+        value={selectedArea}
+        onChange={(e) => {
+          const newValue = e.target.value;
+          setSelectedArea(newValue);
+          if (newValue) {  // Only focus if a value is selected
+            focusOnArea(newValue);
+          }
+        }}
+        displayEmpty
+        MenuProps={{
+          PaperProps: {
+            sx: {
+              bgcolor: 'rgba(0, 0, 0, 0.9)',
+              backdropFilter: 'blur(8px)',
+              maxHeight: 300,
+              '& .MuiMenuItem-root': {
+                fontSize: '0.75rem',
+                color: 'white',
+                '&:hover': {
+                  bgcolor: 'rgba(255, 255, 255, 0.1)'
+                },
+                '&.Mui-selected': {
+                  bgcolor: 'rgba(255, 255, 255, 0.15)'
+                }
+              }
+            }
+          },
+          anchorOrigin: {
+            vertical: 'bottom',
+            horizontal: 'left',
+          },
+          transformOrigin: {
+            vertical: 'top',
+            horizontal: 'left',
+          },
+          slotProps: {
+            paper: {
+              elevation: 0,
+              sx: {
+                overflow: 'visible',
+                mt: 1.5,
+                '& .MuiList-root': {
+                  maxHeight: '300px',
+                  overflowY: 'auto',
+                  '&::-webkit-scrollbar': {
+                    width: '8px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    background: 'rgba(0, 0, 0, 0.1)',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    background: 'rgba(255, 255, 255, 0.2)',
+                    borderRadius: '4px',
+                  },
+                  '&::-webkit-scrollbar-thumb:hover': {
+                    background: 'rgba(255, 255, 255, 0.3)',
+                  },
+                },
+              },
+            },
+          },
+        }}
+      >
+        <MenuItem value="" disabled>
+          <em>Select Area</em>
+        </MenuItem>
+        {areaOptions.map((area) => (
+          <MenuItem 
+            key={area.value} 
+            value={area.value}
+            sx={{ 
+              fontSize: '0.75rem',
+              padding: '8px 16px',
+              '&:hover': {
+                backgroundColor: 'rgba(255, 255, 255, 0.1)'
+              }
+            }}
+          >
+            {area.label}
+          </MenuItem>
+        ))}
+      </AreaSelect>
+    </>
+  )}
+  {state.simulationType === SIMULATION_TYPES.STIMULUS && (
+    <Button 
+      variant="contained" 
+      onClick={() => focusHighestActivity().catch(console.error)} 
+      sx={turnToButtonStyle}
+    >
+      Turn to Max Activity
+    </Button>
+  )}
+  {state.simulationType === SIMULATION_TYPES.DISABLE && (
+    <Button 
+      variant="contained" 
+      onClick={() => focusDisabledArea().catch(console.error)} 
+      sx={turnToButtonStyle}
+    >
+      Turn to Max Activity
+    </Button>
+  )}
+
   return (
     <ViewerContainer>
       <VTKContainer ref={vtkContainerRef} sx={{ visibility: isInitialized ? 'visible' : 'hidden' }} />
-      <ToggleButton
-        variant="contained"
-        onClick={() => setShowLabels(!showLabels)}
-        active={showLabels ? 1 : 0}
-      >
-        {showLabels ? 'Hide Labels' : 'Show Labels'}
-      </ToggleButton>
-      <Box sx={{ 
-        position: 'absolute', 
-        top: '10px', 
-        right: '10px', 
-        zIndex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-end'
-      }}>
-        <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-          <Button variant="contained" onClick={() => setCameraPosition('front')} sx={{ m: 1 }}>
-            Anterior View
-          </Button>
-          <Button variant="contained" onClick={() => setCameraPosition('top')} sx={{ m: 1 }}>
-            Superior View
-          </Button>
-          <Button variant="contained" onClick={() => setCameraPosition('right')} sx={{ m: 1 }}>
-            Right View
-          </Button>
-        </Box>
-        {state.simulationType === SIMULATION_TYPES.CALCIUM && (
-          <Button 
-            variant="contained" 
-            onClick={() => focusHighestDifference().catch(console.error)} 
-            sx={{ 
-              width: '100%',
-              background: theme.palette.gradients.blue,
-              '&:hover': {
-                background: theme.palette.gradients.blue,
-                filter: 'brightness(0.9)'
-              }
-            }}
-          >
-            Turn to Area of Maximum Calcium Gradient
-          </Button>
-        )}
-        {state.simulationType === SIMULATION_TYPES.STIMULUS && (
-          <Button 
-            variant="contained" 
-            onClick={() => focusHighestActivity().catch(console.error)} 
-            sx={{ 
-              width: '100%',
-              background: theme.palette.gradients.red,
-              '&:hover': {
-                background: theme.palette.gradients.red,
-                filter: 'brightness(0.9)'
-              }
-            }}
-          >
-            Turn to Area of Maximum Activity
-          </Button>
-        )}
-        {state.simulationType === SIMULATION_TYPES.DISABLE && (
-          <Button 
-            variant="contained" 
-            onClick={() => focusDisabledArea().catch(console.error)} 
-            sx={{ 
-              width: '100%',
-              background: theme.palette.gradients.gray,
-              '&:hover': {
-                background: theme.palette.gradients.gray,
-                filter: 'brightness(0.9)'
-              }
-            }}
-          >
-            Turn to Area of Maximum Activity
-          </Button>
-        )}
-      </Box>
       <InfoOverlay>
         <StyledTypography>
           Simulation: {formatSimulationType(state.simulationType)}
@@ -2312,6 +2567,230 @@ const VTPViewer = () => {
           Timestep: {state.currentTimestep.toLocaleString()}
         </StyledTypography>
       </InfoOverlay>
+      <ToggleButton
+        variant="contained"
+        onClick={() => setShowLabels(!showLabels)}
+        active={showLabels ? 1 : 0}
+        sx={{ top: '70px' }}
+      >
+        {showLabels ? 'Hide Labels' : 'Show Labels'}
+      </ToggleButton>
+
+      <Box sx={{ 
+        position: 'absolute', 
+        top: '10px', 
+        right: '10px', 
+        zIndex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1,
+        width: '160px'
+      }}>
+        {/* Camera control buttons */}
+        <Box sx={{ 
+          display: 'flex', 
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: 1,
+          overflow: 'hidden',
+          height: '32px'
+        }}>
+          <Button 
+            variant="contained" 
+            onClick={() => setCameraPosition('front')} 
+            sx={{ 
+              borderRadius: '4px 0 0 4px',
+              borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+              minWidth: '80px',
+              padding: '4px 8px',
+              fontSize: '0.75rem',
+              lineHeight: 1
+            }}
+          >
+            Anterior
+          </Button>
+          <Button 
+            variant="contained" 
+            onClick={() => setCameraPosition('back')} 
+            sx={{ borderRadius: '0 4px 4px 0', minWidth: '80px', padding: '4px 8px', fontSize: '0.75rem', lineHeight: 1 }}
+          >
+            Posterior
+          </Button>
+        </Box>
+
+        <Box sx={{ 
+          display: 'flex', 
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: 1,
+          overflow: 'hidden',
+          height: '32px'
+        }}>
+          <Button 
+            variant="contained" 
+            onClick={() => setCameraPosition('top')} 
+            sx={{ 
+              borderRadius: '4px 0 0 4px',
+              borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+              minWidth: '80px',
+              padding: '4px 8px',
+              fontSize: '0.75rem',
+              lineHeight: 1
+            }}
+          >
+            Superior
+          </Button>
+          <Button 
+            variant="contained" 
+            onClick={() => setCameraPosition('bottom')} 
+            sx={{ borderRadius: '0 4px 4px 0', minWidth: '80px', padding: '4px 8px', fontSize: '0.75rem', lineHeight: 1 }}
+          >
+            Inferior
+          </Button>
+        </Box>
+
+        <Box sx={{ 
+          display: 'flex', 
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: 1,
+          overflow: 'hidden',
+          height: '32px'
+        }}>
+          <Button 
+            variant="contained" 
+            onClick={() => setCameraPosition('right')} 
+            sx={{ 
+              borderRadius: '4px 0 0 4px',
+              borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+              minWidth: '80px',
+              padding: '4px 8px',
+              fontSize: '0.75rem',
+              lineHeight: 1
+            }}
+          >
+            Right
+          </Button>
+          <Button 
+            variant="contained" 
+            onClick={() => setCameraPosition('left')} 
+            sx={{ borderRadius: '0 4px 4px 0', minWidth: '80px', padding: '4px 8px', fontSize: '0.75rem', lineHeight: 1 }}
+          >
+            Left
+          </Button>
+        </Box>
+
+        {/* Area Selection - Now always visible */}
+        <AreaSelect
+          value={selectedArea}
+          onChange={(e) => {
+            const newValue = e.target.value;
+            setSelectedArea(newValue);
+            if (newValue) {  // Only focus if a value is selected
+              focusOnArea(newValue);
+            }
+          }}
+          displayEmpty
+          MenuProps={{
+            PaperProps: {
+              sx: {
+                bgcolor: 'rgba(0, 0, 0, 0.9)',
+                backdropFilter: 'blur(8px)',
+                maxHeight: 300,
+                '& .MuiMenuItem-root': {
+                  fontSize: '0.75rem',
+                  color: 'white',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.1)'
+                  },
+                  '&.Mui-selected': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }
+              }
+            },
+            anchorOrigin: {
+              vertical: 'bottom',
+              horizontal: 'left',
+            },
+            transformOrigin: {
+              vertical: 'top',
+              horizontal: 'left',
+            },
+            slotProps: {
+              paper: {
+                elevation: 0,
+                sx: {
+                  overflow: 'visible',
+                  mt: 1.5,
+                  '& .MuiList-root': {
+                    maxHeight: '300px',
+                    overflowY: 'auto',
+                    '&::-webkit-scrollbar': {
+                      width: '8px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      background: 'rgba(0, 0, 0, 0.1)',
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      background: 'rgba(255, 255, 255, 0.2)',
+                      borderRadius: '4px',
+                    },
+                    '&::-webkit-scrollbar-thumb:hover': {
+                      background: 'rgba(255, 255, 255, 0.3)',
+                    },
+                  },
+                },
+              },
+            },
+          }}
+        >
+          <MenuItem value="" disabled>
+            <em>Select Area</em>
+          </MenuItem>
+          {areaOptions.map((area) => (
+            <MenuItem 
+              key={area.value} 
+              value={area.value}
+              sx={{ 
+                fontSize: '0.75rem',
+                padding: '8px 16px',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)'
+                }
+              }}
+            >
+              {area.label}
+            </MenuItem>
+          ))}
+        </AreaSelect>
+
+        {/* Simulation-specific buttons */}
+        {state.simulationType === SIMULATION_TYPES.CALCIUM && (
+          <Button 
+            variant="contained" 
+            onClick={() => focusHighestDifference().catch(console.error)} 
+            sx={turnToButtonStyle}
+          >
+            Turn to Max Calcium
+          </Button>
+        )}
+        {state.simulationType === SIMULATION_TYPES.STIMULUS && (
+          <Button 
+            variant="contained" 
+            onClick={() => focusHighestActivity().catch(console.error)} 
+            sx={turnToButtonStyle}
+          >
+            Turn to Max Activity
+          </Button>
+        )}
+        {state.simulationType === SIMULATION_TYPES.DISABLE && (
+          <Button 
+            variant="contained" 
+            onClick={() => focusDisabledArea().catch(console.error)} 
+            sx={turnToButtonStyle}
+          >
+            Turn to Max Activity
+          </Button>
+        )}
+      </Box>
       {(isLoading || loadingStates.neurons || loadingStates.connections) && (
         <LoadingOverlay>
           <CircularProgress 
