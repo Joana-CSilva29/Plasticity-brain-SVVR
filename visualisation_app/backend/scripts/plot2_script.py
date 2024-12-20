@@ -165,7 +165,6 @@ def plot_correlation_matrix_ordered(connection_matrix, time_step, simulation, ou
 
 
 
-
 simType = 'no-network'  # Change to your simulation type
 positions_file = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simType}/positions/rank_0_positions.txt'
 network_dir = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simType}/network'
