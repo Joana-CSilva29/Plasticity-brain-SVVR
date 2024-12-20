@@ -64,7 +64,7 @@ def parse_network_file(network_file, neuron_area_map):
 # ----------------------------------------------------
 # Main execution
 # ----------------------------------------------------
-simulation = 'disable'  # Adjust if needed
+simulation = 'calcium'  # Adjust if needed
 positions_file = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simulation}/positions/rank_0_positions.txt'
 neuron_area_map = parse_positions_file(positions_file)
 
@@ -113,7 +113,7 @@ for area in sorted(results_all_areas.keys()):
     ))
 
 fig.update_layout(
-    title="Total Connections per area @ Disable Simulation",
+    title="Total Connections per area @ Calcium Simulation",
     xaxis_title="Time Step",
     yaxis_title="Number of Synapses",
     template="plotly_dark",
@@ -122,7 +122,7 @@ fig.update_layout(
 )
 fig.update_layout(
     title=dict(
-        text="Total Connections per area @ Disable Simulation",
+        text="Total Connections per area @ Calcium Simulation",
         font=dict(size=24)  # Increase the title font size
     ),
     xaxis=dict(
@@ -141,7 +141,7 @@ fig.update_layout(
     hovermode="x"
 )
 
-output_file = f"disabled_analysis.html"
+output_file = f"calcium_analysis.html"
 
 fig.write_html(output_file)
 
