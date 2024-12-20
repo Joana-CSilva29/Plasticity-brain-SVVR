@@ -281,7 +281,7 @@ def plot_combined_parallel_and_box(neuron_df, target_step, simulation, output_di
 
 # Main execution
 target_step = 0
-simulation = 'no-network'
+simulation = 'stimulus'
 data_dir = f'/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-{simulation}/monitors'
 positions_file = f'/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-{simulation}/positions/rank_0_positions.txt'
 

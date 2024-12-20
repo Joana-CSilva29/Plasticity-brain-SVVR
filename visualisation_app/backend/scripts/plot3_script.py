@@ -1,211 +1,223 @@
+#!/usr/bin/env python3
+
 import os
+import pandas as pd
 import numpy as np
+from tqdm import tqdm
 import plotly.graph_objects as go
-import plotly.subplots as sp
+from collections import defaultdict
 
-def read_plasticity_changes(file_path):
-    steps, creations, deletions, net_changes = [], [], [], []
-    try:
-        with open(file_path, 'r') as file:
-            for line in file:
-                if line.startswith('#') or not line.strip():
-                    continue
-                data = line.strip().replace(':', '').split()
-                steps.append(int(data[0]))
-                creations.append(int(data[1]))
-                deletions.append(int(data[2]))
-                net_changes.append(int(data[3]))
-    except FileNotFoundError:
-        print(f"File {file_path} not found.")
-        return None, None, None, None
-    return steps, creations, deletions, net_changes
+def parse_positions_file(positions_file):
+    """
+    Parses the positions file to map neuron IDs to their corresponding areas.
+    
+    Parameters:
+        positions_file (str): Path to the positions file.
+        
+    Returns:
+        dict: A dictionary mapping neuron IDs to area names.
+    """
+    neuron_area_map = {}
+    with open(positions_file, "r") as file:
+        for line in file:
+            if line.startswith("#") or not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) < 5:
+                continue  # Skip malformed lines
+            neuron_id = parts[0]  # Local neuron ID
+            area = parts[4]       # Area name (e.g., "area_8")
+            neuron_area_map[neuron_id] = area
+    return neuron_area_map
 
-def read_neurons_with_std(file_path):
-    steps = []
-    calcium_avg, calcium_std = [], []
-    axons_avg, axons_std = [], []
-    axons_c_avg, axons_c_std = [], []
-    den_ex_avg, den_ex_std = [], []
-    try:
-        with open(file_path, 'r') as file:
-            for line in file:
-                if line.startswith('#') or not line.strip():
-                    continue
-                data = line.strip().split()
-                steps.append(int(data[0]))
-                calcium_avg.append(float(data[1]))
-                calcium_std.append(float(data[5]))
-                axons_avg.append(float(data[6]))
-                axons_std.append(float(data[10]))
-                axons_c_avg.append(float(data[11]))
-                axons_c_std.append(float(data[15]))
-                den_ex_avg.append(float(data[16]))
-                den_ex_std.append(float(data[20]))
-    except FileNotFoundError:
-        print(f"File {file_path} not found.")
-        return None, None, None, None, None, None, None, None, None
-    return steps, calcium_avg, calcium_std, axons_avg, axons_std, axons_c_avg, axons_c_std, den_ex_avg, den_ex_std
+def parse_network_file(network_file, neuron_area_map):
+    """
+    Parses the network_out file to count the number of connections between areas (undirected).
+    
+    Parameters:
+        network_file (str): Path to the network file.
+        neuron_area_map (dict): Mapping of neuron IDs to area names.
+        
+    Returns:
+        defaultdict: A dictionary with area pair tuples as keys and connection counts as values.
+    """
+    area_connections = defaultdict(int)
 
-def plot_combined_plots_refined(plasticity_data, neurons_data, output_file):
-    colors = {
-        'no-network': 'rgba(0, 0, 255, 1)',   # Blue
-        'disabled': 'rgba(255, 165, 0, 1)',  # Orange
-        'calcium': 'rgba(0, 128, 0, 1)',     # Green
-        'stimulus': 'rgba(128, 0, 128, 1)',  # Purple
+    if not os.path.exists(network_file):
+        print(f"Network file not found: {network_file}")
+        return None
+
+    with open(network_file, "r") as f:
+        for line in f:
+            if line.startswith("#") or not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) < 4:
+                continue  # Skip malformed lines
+            target_id = parts[1]  # Extract target neuron ID directly
+            source_id = parts[3]  # Extract source neuron ID directly
+
+            target_area = neuron_area_map.get(target_id)
+            source_area = neuron_area_map.get(source_id)
+
+            if target_area and source_area:
+                # Convert area names (e.g., 'area_8') to ints
+                def area_key(a):
+                    return int(a.split('_')[1]) if '_' in a and a.split('_')[1].isdigit() else a
+
+                a1 = area_key(source_area)
+                a2 = area_key(target_area)
+
+                # Create a sorted tuple for the area pair to ensure undirected consistency
+                pair = tuple(sorted((a1, a2)))
+                area_connections[pair] += 1
+
+    return area_connections
+
+def create_output_directory(simType):
+    """
+    Creates the output directory for plots based on the simulation type.
+    
+    Parameters:
+        simType (str): The type of simulation.
+        
+    Returns:
+        str: Path to the created output directory.
+    """
+    output_dir = f"/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality/Plasticity-brain-SVVR/visualisation_app/backend/uploads/{simType}/plots"
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
+
+def get_simulation_paths():
+    """
+    Defines the paths for different simulation types.
+    
+    Returns:
+        dict: A dictionary mapping simulation types to their respective directories.
+    """
+    simulations = {
+        'no-network': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality/Project SVVR/viz-no-network/',
+        'disabled': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality/Project SVVR/viz-disable/',
+        'calcium': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality/Project SVVR/viz-calcium/',
+        'stimulus': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-stimulus/',
     }
+    return simulations
 
-    # Define figure layout with multiple subplots
-    fig = sp.make_subplots(
-        rows=6, cols=2,
-        specs=[
-            [{"colspan": 2}, None],  # Row 1: Plasticity Creations
-            [{"colspan": 2}, None],  # Row 2: Plasticity Deletions
-            [{"colspan": 2}, None],  # Row 3: Plasticity Net Changes
-            [{"colspan": 2}, None],  # Row 4: Neuron overview title
-            [{}, {}],                # Row 5: Neuron Calcium & Axons
-            [{}, {}],                # Row 6: Neuron Connected Axons & Dendrites
-        ],
-        vertical_spacing=0.02,
-        horizontal_spacing=0.1
-    )
+def generate_connectivity_plot_per_timestep(simType, simulation_path, neuron_area_map, areas_of_interest, time_steps, output_dir):
+    """
+    Generates and saves a connectivity plot for each timestep in the given simulation.
+    
+    Parameters:
+        simType (str): The type of simulation.
+        simulation_path (str): Path to the simulation directory.
+        neuron_area_map (dict): Mapping of neuron IDs to area names.
+        areas_of_interest (list): List of area pairs to analyze.
+        time_steps (range): Range of time steps to process.
+        output_dir (str): Directory to save the output plots.
+    """
+    # Initialize a dictionary to store cumulative results for each pair
+    cumulative_results = {pair: 0 for pair in areas_of_interest}
+    
+    for t in tqdm(time_steps, desc=f"Processing Time Steps for {simType}"):
+        network_file = os.path.join(simulation_path, f"network/rank_0_step_{t}_out_network.txt")
+        area_connections = parse_network_file(network_file, neuron_area_map)
 
-    simulations = list(plasticity_data.keys())
+        if area_connections is None:
+            # If the file doesn't exist or can't be parsed, skip this timestep
+            continue
 
-    # Add dummy traces for legend
-    for sim in simulations:
-        fig.add_trace(go.Scatter(
-            x=[np.nan], y=[np.nan],
-            mode='lines',
-            line=dict(color=colors[sim], width=2),
-            name=sim,
-            legendgroup=sim,
-            showlegend=True
-        ), row=1, col=1)
+        # Update cumulative connections for each pair of interest
+        for pair in areas_of_interest:
+            count = area_connections.get(pair, 0)
+            cumulative_results[pair] += count
 
-    # Plasticity title
-    fig.add_annotation(
-        text="<b>Plasticity Changes Overview Across Simulations</b>",
-        x=0.5, y=1.03, xref="paper", yref="paper",
-        showarrow=False, font=dict(size=18), align="center"
-    )
+        # Generate plot for the current timestep
+        fig = go.Figure()
 
-    # Plasticity metrics
-    metrics = ["Creations", "Deletions", "Net Changes"]
-    y_labels = ["Created synapses", "Deleted synapses", "Net Changes"]
+        # Add a trace for each pair
+        for pair in areas_of_interest:
+            fig.add_trace(go.Bar(
+                x=[f"{pair[0]}-{pair[1]}"],
+                y=[cumulative_results[pair]],
+                name=f"{pair[0]}-{pair[1]}"
+            ))
 
-    for idx, (metric, y_label) in enumerate(zip(metrics, y_labels), start=1):
-        current_row = idx
-        for label, data in plasticity_data.items():
-            if data[0] is None:
-                continue
-            steps, creations, deletions, net_changes = data
-            values = creations if metric == "Creations" else (deletions if metric == "Deletions" else net_changes)
-            fig.add_trace(go.Scatter(
-                x=steps, y=values, mode='lines',
-                line=dict(color=colors[label], width=2),
-                legendgroup=label,
-                showlegend=False
-            ), row=current_row, col=1)
-
-        fig.update_yaxes(title_text=y_label, row=current_row, col=1)
-        fig.update_xaxes(
-            tickvals=[0, 0.2e6, 0.4e6, 0.6e6, 0.8e6, 1.0e6],
-            ticktext=["0", "0.2M", "0.4M", "0.6M", "0.8M", "1M"],
-            title_text="Time Step" if metric == "Net Changes" else "",
-            row=current_row, col=1
+        # Update layout
+        fig.update_layout(
+            title={
+                "text": f"Connectivity Analysis @ Timestep {t} ({simType.capitalize()} Simulation)",
+                "font": {"size": 24}
+            },
+            xaxis={
+                "title": {"text": "Area Pairs", "font": {"size": 18}},
+                "tickfont": {"size": 14}
+            },
+            yaxis={
+                "title": {"text": "Cumulative Number of Synapses", "font": {"size": 18}},
+                "tickfont": {"size": 14}
+            },
+            legend={
+                "title": {"text": "Area Pairs", "font": {"size": 16}},
+                "font": {"size": 14}
+            },
+            template="plotly_dark",
+            hovermode="x"
         )
 
-    # Neuron overview title
-    fig.add_annotation(
-        text="<b>Neuron Properties Overview Across Simulations</b>",
-        x=0.5, y=0.37, xref="paper", yref="paper",
-        showarrow=False, font=dict(size=18), align="center"
+        # Define the output file with the current timestep
+        output_file = os.path.join(output_dir, f"plot3_{t}.html")
+
+        fig.write_html(output_file)
+        print(f"Plot saved to {output_file} in the directory {output_dir}")
+
+
+
+def main():
+    """
+    Main function to execute the connectivity analysis and plotting for specified simulations.
+    """
+    # Define the simulation type you want to process
+    simType = 'stimulus'  # Change this to process a different simulation
+    
+    # Get all simulation paths
+    simulations = get_simulation_paths()
+    
+    # Check if simType is valid
+    if simType not in simulations:
+        print(f"Simulation type '{simType}' is not recognized. Available types: {list(simulations.keys())}")
+        return
+    
+    simulation_path = simulations[simType]
+    
+    # Define the positions file path
+    positions_file = os.path.join(simulation_path, 'positions/rank_0_positions.txt')
+    
+    if not os.path.exists(positions_file):
+        print(f"Positions file not found: {positions_file}")
+        return
+    
+    # Parse the positions file to get neuron to area mapping
+    neuron_area_map = parse_positions_file(positions_file)
+    
+    # Define areas of interest as list of tuples (sorted)
+    areas_of_interest = [(8,30), (8,34), (30,34)]
+    
+    # Define the time steps you want to iterate through
+    # Adjust this range as needed; here we do from 0 to 1,000,000 in steps of 10,000
+    time_steps = range(0, 1000001, 10000)
+    
+    # Create the output directory for plots
+    output_dir = create_output_directory(simType)
+    
+    # Generate connectivity plots for each timestep
+    generate_connectivity_plot_per_timestep(
+        simType=simType,
+        simulation_path=simulation_path,
+        neuron_area_map=neuron_area_map,
+        areas_of_interest=areas_of_interest,
+        time_steps=time_steps,
+        output_dir=output_dir
     )
 
-    neuron_metrics = ["Calcium", "Axons", "Connected Axons", "Dendrites"]
-    for idx, metric in enumerate(neuron_metrics, start=1):
-        row_offset, col_offset = divmod(idx - 1, 2)
-        row = 5 + row_offset
-        col = 1 + col_offset
-
-        for label, data in neurons_data.items():
-            if data[0] is None:
-                continue
-
-            steps, calcium_avg, calcium_std, axons_avg, axons_std, axons_c_avg, axons_c_std, den_ex_avg, den_ex_std = data
-            avg, std = (
-                (calcium_avg, calcium_std) if metric == "Calcium" else
-                (axons_avg, axons_std) if metric == "Axons" else
-                (axons_c_avg, axons_c_std) if metric == "Connected Axons" else
-                (den_ex_avg, den_ex_std)
-            )
-
-            fig.add_trace(go.Scatter(
-                x=steps, y=avg, mode='lines',
-                line=dict(color=colors[label], width=2),
-                legendgroup=label,
-                showlegend=False
-            ), row=row, col=col)
-
-            fig.add_trace(go.Scatter(
-                x=steps + steps[::-1],
-                y=(np.array(avg) + np.array(std)).tolist() + (np.array(avg) - np.array(std)).tolist()[::-1],
-                fill='toself',
-                fillcolor=colors[label].replace("1)", "0.2)"),
-                line=dict(width=0),
-                legendgroup=label,
-                showlegend=False
-            ), row=row, col=col)
-
-        fig.update_yaxes(title_text=metric, row=row, col=col)
-        fig.update_xaxes(
-            tickvals=[0, 0.2e6, 0.4e6, 0.6e6, 0.8e6, 1.0e6],
-            ticktext=["0", "0.2M", "0.4M", "0.6M", "0.8M", "1M"],
-            title_text="Time Step" if row == 6 else "",
-            row=row, col=col
-        )
-
-    fig.update_layout(
-        height=1900,
-        width=1400,
-        template="plotly_dark",
-        margin=dict(l=50, r=50, t=50, b=50),
-        showlegend=True,
-        legend=dict(
-            orientation='h',
-            x=0.5,
-            y=1.05,
-            xanchor='center',
-            yanchor='bottom'
-        )
-    )
-
-    fig.write_html(output_file)
-    print(f"Combined interactive plot saved to {output_file}")
-
-# Main code:
-simType = 'stimulus'
-output_dir = f"/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Plasticity-brain-SVVR/visualisation_app/backend/uploads/{simType}/plots"
-os.makedirs(output_dir, exist_ok=True)
-
-simulations = {
-    'no-network': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/',
-    'disabled': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-disable/',
-    'calcium': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-calcium/',
-    'stimulus': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-stimulus/',
-}
-
-# Load all plasticity and neuron data once
-plasticity_data = {}
-for label, path in simulations.items():
-    plasticity_file = f"{path}rank_0_plasticity_changes.txt"
-    plasticity_data[label] = read_plasticity_changes(plasticity_file)
-
-neurons_data = {}
-for label, path in simulations.items():
-    neurons_file = f"{path}rank_0_neurons_overview.txt"
-    neurons_data[label] = read_neurons_with_std(neurons_file)
-
-# This plot is a single overview, not dependent on timestep
-output_file = os.path.join(output_dir, "plot3_0.html")
-plot_combined_plots_refined(plasticity_data, neurons_data, output_file)
+if __name__ == "__main__":
+    main()
