@@ -22,6 +22,8 @@ import { useDisableVisualization } from '../hooks/vtk/useDisableVisualization';
 const FIXED_MIN = -70;  // Fixed minimum membrane potential (mV)
 const FIXED_MAX = -30;  // Fixed maximum membrane potential (mV)
 
+
+
 const ViewerContainer = styled(Box)({
   width: '100%',
   height: '100%',
@@ -188,9 +190,43 @@ const formatSimulationType = (type) => {
   }
 };
 
+// Add this new function near the top of the file, after the imports
+const useAreaMapping = () => {
+  const [areaToBAMapping, setAreaToBAMapping] = useState(new Map());
+
+  useEffect(() => {
+    const loadMapping = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/files/info/area-to-ba-mapping.txt');
+        const text = await response.text();
+        const mapping = new Map();
+        
+        text.split('\n').forEach(line => {
+          if (!line.trim()) return;
+          const [areaId, baId] = line.split('|');
+          if (areaId && baId) {
+            mapping.set(areaId.trim(), baId.trim());
+          }
+        });
+        
+        setAreaToBAMapping(mapping);
+      } catch (error) {
+        console.error('Error loading area to BA mapping:', error);
+      }
+    };
+
+    loadMapping();
+  }, []);
+
+  return areaToBAMapping;
+};
+
 const VTPViewer = () => {
   const state = useVTKState();
   const dispatch = useVTKDispatch();
+  const theme = useTheme();
+  const areaToBAMapping = useAreaMapping(); // Move this up
+  
   const vtkContainerRef = useRef(null);
   const [containerReady, setContainerReady] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -222,7 +258,6 @@ const VTPViewer = () => {
     neurons: false,
     connections: false
   });
-  const theme = useTheme();
   const [stimulusData, setStimulusData] = useState(null);
   // Add these state variables near your other useState declarations
   const [activityStats, setActivityStats] = useState({
@@ -759,8 +794,8 @@ const VTPViewer = () => {
 
   // Add this function to create labels
   const createLabels = useCallback(async () => {
-    if (!context.current.renderer || !labelContext.current) {
-      console.log('Missing renderer or label context');
+    if (!context.current.renderer || !labelContext.current || !areaToBAMapping) { // Add check for areaToBAMapping
+      console.log('Missing renderer, label context, or area mapping');
       return;
     }
 
@@ -859,7 +894,7 @@ const VTPViewer = () => {
         labelPoints.push({ 
           centroid, 
           label: areaId, 
-          color: state.simulationType === SIMULATION_TYPES.NO_NETWORK ? areaColorMap.get(areaId) : [255, 255, 255],  // White for calcium and stimulus
+          color: [255, 255, 255],  // Always white, removed conditional
           bounds: { minX, minY, minZ, maxX, maxY, maxZ }
         });
       });
@@ -902,6 +937,12 @@ const VTPViewer = () => {
 
         coordsList.forEach((xy, idx) => {
           const { label, color } = labelPoints[idx];
+          const baId = areaToBAMapping.get(label);
+          
+          // Format label to show BA number instead of area number
+          const displayLabel = baId 
+            ? `BA ${baId.split('_')[1]}`  // Show "BA X" instead of "area_X"
+            : `BA ${label.split('_')[1]}`; // Always show BA prefix, even for area numbers
 
           // Calculate relative positions (0 to 1) from the center
           const relX = (xy[0] / canvasWidth) - 0.5;
@@ -916,28 +957,24 @@ const VTPViewer = () => {
           const x = (relX * scale + 0.5 + xOffset) * canvasWidth;
           const y = canvasHeight - ((relY * scale + 0.5 + yOffset) * canvasHeight);
 
-          // Format label
-          const areaNumber = label.split('_')[1];
-          const brodmannLabel = `BA ${areaNumber}`;
-
           // Draw shadow/outline
           ctx.font = 'bold 14px Arial';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
           ctx.lineWidth = 3;
-          ctx.strokeText(brodmannLabel, x, y);
+          ctx.strokeText(displayLabel, x, y);
 
           // Use white for calcium and stimulus modes, original colors for no-network mode
           ctx.fillStyle = state.simulationType === SIMULATION_TYPES.NO_NETWORK
             ? `rgb(${Math.round(color[0] * 255)}, ${Math.round(color[1] * 255)}, ${Math.round(color[2] * 255)})`
             : 'rgb(255, 255, 255)';
-          ctx.fillText(brodmannLabel, x, y);
+          ctx.fillText(displayLabel, x, y);
 
-          // Store label position
+          // Store label position with both area and BA info
           labelPositions.current.set(`${x},${y}`, {
             label: label,
-            brodmannArea: brodmannLabel,
+            brodmannArea: baId,
             color,
             bounds: labelPoints[idx].bounds
           });
@@ -952,7 +989,7 @@ const VTPViewer = () => {
     } catch (error) {
       console.error('Error creating labels:', error);
     }
-  }, [labelActor, state.simulationType]);
+  }, [labelActor, state.simulationType, areaToBAMapping]);
 
   // Add this effect to handle label visibility
   useEffect(() => {
@@ -1126,9 +1163,11 @@ const VTPViewer = () => {
     animate();
   };
 
-  // Add this function to handle mouse movement
+
+
+  // Modify the handleMouseMove function to use the mapping
   const handleMouseMove = useCallback((event) => {
-    if (!labelCanvas.current || !showLabels) {
+    if (!labelCanvas.current || !showLabels || !areaToBAMapping) { // Add check for areaToBAMapping
       setTooltipInfo(null);
       return;
     }
@@ -1147,16 +1186,16 @@ const VTPViewer = () => {
 
       if (distance < 20) {
         foundLabel = true;
-        const areaId = labelInfo.label;  // Use the original area_XX format
-        const brodmannId = areaId.replace('area_', 'BA_');
-        const areaInfo = brodmannInfo.get(brodmannId);
+        const areaId = labelInfo.label;
+        const baId = areaToBAMapping.get(areaId);
+        const areaInfo = brodmannInfo.get(baId);
         
         if (areaInfo) {
           if (state.simulationType === SIMULATION_TYPES.CALCIUM) {
             const areaData = calciumViz?.areaData.get(areaId);
             setTooltipInfo({
               ...labelInfo,
-              name: areaInfo.name,
+              name: `${baId.replace('BA_', 'Brodmann Area ')} - ${areaInfo.name}`,
               description: areaInfo.description,
               calciumDiff: areaData 
                 ? `Calcium difference from target: ${(areaData.difference * 100).toFixed(4)}%`
@@ -1169,7 +1208,7 @@ const VTPViewer = () => {
             const areaData = stimulusViz?.areaData.get(areaId);
             setTooltipInfo({
               ...labelInfo,
-              name: areaInfo.name,
+              name: `${baId.replace('BA_', 'Brodmann Area ')} - ${areaInfo.name}`,
               description: areaInfo.description,
               activityInfo: areaData 
                 ? `Membrane potential: ${areaData.activityLevel.toFixed(2)} mV`
@@ -1181,7 +1220,7 @@ const VTPViewer = () => {
           } else {
             setTooltipInfo({
               ...labelInfo,
-              name: areaInfo.name,
+              name: `${baId.replace('BA_', 'Brodmann Area ')} - ${areaInfo.name}`,
               description: areaInfo.description
             });
           }
@@ -1192,7 +1231,7 @@ const VTPViewer = () => {
     if (!foundLabel) {
       setTooltipInfo(null);
     }
-  }, [showLabels, brodmannInfo, state.simulationType, calciumViz, stimulusViz]);
+  }, [showLabels, brodmannInfo, state.simulationType, calciumViz, stimulusViz, areaToBAMapping]); // Add areaToBAMapping to dependencies
 
   // Add this effect to handle mouse movement
   useEffect(() => {
@@ -2388,6 +2427,7 @@ const VTPViewer = () => {
       // Get camera initial state
       const camera = context.current.renderer.getActiveCamera();
       const initialPosition = camera.getPosition();
+      const initialFocalPoint = camera.getFocalPoint();
       const distance = camera.getDistance();
 
       // Calculate direction from center to target point
@@ -2418,15 +2458,38 @@ const VTPViewer = () => {
           ? 4 * t * t * t 
           : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
-        // Interpolate position
-        const newPosition = [
-          initialPosition[0] + (targetPosition[0] - initialPosition[0]) * easeT,
-          initialPosition[1] + (targetPosition[1] - initialPosition[1]) * easeT,
-          initialPosition[2] + (targetPosition[2] - initialPosition[2]) * easeT
+        // Calculate rotation angle
+        const angle = easeT * Math.PI * 2; // Full 360-degree rotation
+
+        // Calculate rotated position around the center
+        const currentDirection = [
+          initialPosition[0] - center[0],
+          initialPosition[1] - center[1],
+          initialPosition[2] - center[2]
+        ];
+        const targetDirection = [
+          targetPosition[0] - center[0],
+          targetPosition[1] - center[1],
+          targetPosition[2] - center[2]
         ];
 
-        camera.setPosition(...newPosition);
-        camera.setFocalPoint(...targetPoint); // Focus on area center instead of brain center
+        // Interpolate between initial and target directions
+        const interpolatedDirection = [
+          currentDirection[0] + (targetDirection[0] - currentDirection[0]) * easeT,
+          currentDirection[1] + (targetDirection[1] - currentDirection[1]) * easeT,
+          currentDirection[2] + (targetDirection[2] - currentDirection[2]) * easeT
+        ];
+
+        // Apply rotation
+        const rotatedPosition = [
+          center[0] + interpolatedDirection[0] * Math.cos(angle) - interpolatedDirection[1] * Math.sin(angle),
+          center[1] + interpolatedDirection[0] * Math.sin(angle) + interpolatedDirection[1] * Math.cos(angle),
+          center[2] + interpolatedDirection[2]
+        ];
+
+        camera.setPosition(...rotatedPosition);
+        camera.setFocalPoint(...center);
+        camera.setViewUp(0, 0, 1); // Keep "up" direction consistent
         context.current.renderer.resetCameraClippingRange();
         context.current.renderWindow.render();
 
@@ -2832,7 +2895,7 @@ const VTPViewer = () => {
               <span>2%+</span>
             </Box>
             <Typography variant="caption" sx={{ color: 'white', mt: 1, textAlign: 'center' }}>
-              Difference from target calcium level
+              Node color shows difference from target calcium level. The width of the connections is mapped to their weight.
             </Typography>
           </Box>
         </ColorLegend>
@@ -2843,7 +2906,7 @@ const VTPViewer = () => {
             Area Visualization
           </Typography>
           <Typography variant="caption" sx={{ color: 'white', textAlign: 'center' }}>
-            Each color represents a different Brodmann area
+            Each color represents a different Brodmann area. The width of the connections is mapped to their weight.
           </Typography>
         </ColorLegend>
       )}
@@ -2874,23 +2937,8 @@ const VTPViewer = () => {
               <span>-30</span>
             </Box>
             <Typography variant="caption" sx={{ color: 'white', mt: 1, textAlign: 'center' }}>
-              Membrane potential (mV)
+              Membrane potential (mV). The width of the connections is mapped to their weight.
             </Typography>
-            {stimulusViz?.areaData?.get('area_8')?.isStimulated && (
-              <Typography variant="caption" sx={{ color: '#FF5500', mt: 0.5, fontWeight: 'bold' }}>
-                Area 8 under stimulation
-              </Typography>
-            )}
-            {stimulusViz?.areaData?.get('area_30')?.isStimulated && (
-              <Typography variant="caption" sx={{ color: '#FF5500', mt: 0.5, fontWeight: 'bold' }}>
-                Area 30 under stimulation
-              </Typography>
-            )}
-            {stimulusViz?.areaData?.get('area_34')?.isStimulated && (
-              <Typography variant="caption" sx={{ color: '#FF5500', mt: 0.5, fontWeight: 'bold' }}>
-                Area 34 under stimulation
-              </Typography>
-            )}
           </Box>
         </ColorLegend>
       )}
@@ -2919,18 +2967,8 @@ const VTPViewer = () => {
               <span>High</span>
             </Box>
             <Typography variant="caption" sx={{ color: 'white', mt: 1, textAlign: 'center' }}>
-              Activity levels (disabled areas shown in white)
+              Activity levels (disabled areas shown in white). The width of the connections is mapped to their weight.
             </Typography>
-            {disableViz?.areaData?.get('area_5')?.isDisabled && (
-              <Typography variant="caption" sx={{ color: '#FFFFFF', mt: 0.5, fontWeight: 'bold' }}>
-                Area 5 disabled
-              </Typography>
-            )}
-            {disableViz?.areaData?.get('area_8')?.isDisabled && (
-              <Typography variant="caption" sx={{ color: '#FFFFFF', mt: 0.5, fontWeight: 'bold' }}>
-                Area 8 disabled
-              </Typography>
-            )}
           </Box>
         </ColorLegend>
       )}
