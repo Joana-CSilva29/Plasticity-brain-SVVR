@@ -120,5 +120,29 @@ fig.update_layout(
     legend_title_text="Areas",
     hovermode="x"
 )
+fig.update_layout(
+    title=dict(
+        text="Total Connections per area @ Disable Simulation",
+        font=dict(size=24)  # Increase the title font size
+    ),
+    xaxis=dict(
+        title=dict(text="Time Step", font=dict(size=18)),  # Increase x-axis title font size
+        tickfont=dict(size=14)  # Increase x-axis tick font size
+    ),
+    yaxis=dict(
+        title=dict(text="Number of Synapses", font=dict(size=18)),  # Increase y-axis title font size
+        tickfont=dict(size=14)  # Increase y-axis tick font size
+    ),
+    legend=dict(
+        title=dict(text="Areas", font=dict(size=16)),  # Increase legend title font size
+        font=dict(size=14)  # Increase legend entry font size
+    ),
+    template="plotly_dark",
+    hovermode="x"
+)
+
+output_file = f"disabled_analysis.html"
+
+fig.write_html(output_file)
 
 fig.show()

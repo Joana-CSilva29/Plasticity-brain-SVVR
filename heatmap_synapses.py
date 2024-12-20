@@ -80,6 +80,7 @@ def plot_correlation_matrix_ordered(connection_matrix, time_step, simulation, ou
     """
     Plots the correlation matrix as an interactive heatmap with Plotly.
     Only displays the lower triangular part (excluding diagonal).
+    Ensures square cells by linking axis scales.
     """
     # Ensure correct ordering of areas
     ordered_areas = sorted(
@@ -88,16 +89,15 @@ def plot_correlation_matrix_ordered(connection_matrix, time_step, simulation, ou
     )
     connection_matrix = connection_matrix.reindex(index=ordered_areas, columns=ordered_areas, fill_value=0)
 
-    # Format area labels
-    formatted_labels = [f"Area {int(area.split('_')[1])}" if '_' in area else area for area in ordered_areas]
+    # Format area labels to show only the numeric part
+    formatted_labels = [f"{int(area.split('_')[1])}" if '_' in area else area for area in ordered_areas]
 
     # Create a mask for upper triangle including diagonal
+    import numpy as np
     mask = np.triu(np.ones_like(connection_matrix, dtype=bool))
-    # Replace upper triangle (and diagonal) with NaN to hide them
     masked_values = connection_matrix.where(~mask, np.nan)
 
-    # Define a color scale suitable for a dark theme (avoid white)
-    # For example: start near black and move to a brighter blue
+    # Define a color scale suitable for a dark theme
     colors = ["#000000", "#003f5c", "#2c7fb8", "#7fcdbb"]  # dark to lighter tealish-blue
     colorscale = [[i/(len(colors)-1), c] for i, c in enumerate(colors)]
 
@@ -110,28 +110,34 @@ def plot_correlation_matrix_ordered(connection_matrix, time_step, simulation, ou
         z=masked_values.values,
         x=formatted_labels,
         y=formatted_labels,
-        colorscale=colorscale,
+        colorscale='YlOrRd',
         zmin=vmin,
         zmax=vmax,
         hoverongaps=False,
-        colorbar=dict(title="Number of Synapses", tickcolor='white', titlefont_color='white'),
+        colorbar=dict(
+            title="Number of Synapses",
+            tickcolor='white',
+            titlefont_color='white',
+            titlefont=dict(size=20),
+            tickfont=dict(size=18)
+        ),
         xgap=0,
         ygap=0
     ))
 
     fig.update_layout(
         title=dict(
-            text=f'Disabled Simulation @ Time Step {time_step}',
-            font=dict(color='white')
+            text=f'{simulation.capitalize()} Simulation @ Time Step {time_step}',
+            font=dict(color='white', size=24)
         ),
         xaxis=dict(
             title="Area", 
-            tickangle=45, 
             showgrid=False, 
             zeroline=False, 
             showline=False,
-            tickfont=dict(color='white'), 
-            titlefont=dict(color='white')
+            tickfont=dict(color='white', size=15), 
+            titlefont=dict(color='white', size=20),
+            constrain='domain'  # Use entire domain
         ),
         yaxis=dict(
             title="Area", 
@@ -139,12 +145,17 @@ def plot_correlation_matrix_ordered(connection_matrix, time_step, simulation, ou
             showgrid=False, 
             zeroline=False, 
             showline=False,
-            tickfont=dict(color='white'), 
-            titlefont=dict(color='white')
+            tickfont=dict(color='white', size=15), 
+            titlefont=dict(color='white', size=20),
+            constrain='domain',  # Use entire domain
+            scaleanchor="x",     # Link the Y-axis scale to the X-axis
+            scaleratio=1         # 1:1 aspect ratio
         ),
         template='plotly_dark',
         paper_bgcolor='black',
-        plot_bgcolor='black'
+        plot_bgcolor='black',
+        margin=dict(l=50, r=50, t=80, b=50),
+        font=dict(size=20)
     )
 
     if output_file:
@@ -156,9 +167,11 @@ def plot_correlation_matrix_ordered(connection_matrix, time_step, simulation, ou
 
 
 
+
+
 # Main execution
-time_step = 30000
-simulation = 'disable'
+time_step = 0
+simulation = 'no-network'
 positions_file = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simulation}/positions/rank_0_positions.txt'
 network_file = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simulation}/network/rank_0_step_{time_step}_out_network.txt'
 

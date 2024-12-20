@@ -21,7 +21,7 @@ def read_csv_safely(file_path):
     try:
         df = pd.read_csv(file_path, delimiter=';', header=None, names=column_names, engine='python')
         df['step'] = df['step'].astype(int)
-        df['global_step'] = df.index  # Add global step as row index
+        df['global_step'] = df.index*100  # Add global step as row index
 
         return df
     except Exception as e:
@@ -276,8 +276,8 @@ def plot_combined_parallel_and_box(neuron_df, target_step, output_dir="plots"):
 
 # Main execution
 data_dir = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network/monitors'
-positions_file = '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network/positions/rank_0_positions.txt'
-target_step = 1000  # Change to your desired global step
+positions_file = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-no-network/positions/rank_0_positions.txt'
+target_step = 10000  # Change to your desired global step
 
 # Parse positions file to create neuron-to-area mapping
 neuron_area_map = parse_positions_file(positions_file)

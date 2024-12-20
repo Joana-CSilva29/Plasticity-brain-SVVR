@@ -10,6 +10,7 @@ from plotly.subplots import make_subplots
 def read_csv_safely(file_path):
     """
     Reads a CSV file with predefined column names and adds a global step column.
+    Attempts to convert certain columns to numeric, coercing errors.
     """
     column_names = [
         "step", "fired", "fired_fraction", "activity", "dampening", 
@@ -20,9 +21,18 @@ def read_csv_safely(file_path):
 
     try:
         df = pd.read_csv(file_path, delimiter=';', header=None, names=column_names, engine='python')
-        df['step'] = df['step'].astype(int)
-        df['global_step'] = df.index * 100
+        df['step'] = pd.to_numeric(df['step'], errors='coerce')
+        # Convert the growth and connection columns to numeric
+        numeric_cols = ["fired_fraction", "current_calcium", "target_calcium", "synaptic_input",
+                        "background_input", "grown_axons", "connected_axons", "grown_dendrites", "connected_dendrites"]
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # Drop rows that have NaN in critical columns if needed
+        # (e.g. grown_axons and grown_dendrites must be numeric)
+        df = df.dropna(subset=["grown_axons", "grown_dendrites"])
+
+        df['global_step'] = df.index * 100
         return df
     except Exception as e:
         print(f"Error reading file {file_path}: {e}")
@@ -43,13 +53,16 @@ def parse_positions_file(positions_file):
             neuron_area_map[neuron_id] = area
     return neuron_area_map
 
+
+
+
 def extract_neuron_properties(data_dir, target_step, neuron_area_map):
     """
     Extracts calcium, growth, and connectivity properties for each neuron, with a progress bar.
+    Handles non-numeric values by skipping those neurons.
     """
     records = []
 
-    # Use tqdm to create a progress bar for the loop
     for neuron_id, area in tqdm(neuron_area_map.items(), desc="Processing Neurons", unit="neuron"):
         file_path = os.path.join(data_dir, f"0_{neuron_id}.csv")
         if not os.path.exists(file_path):
@@ -60,7 +73,6 @@ def extract_neuron_properties(data_dir, target_step, neuron_area_map):
         if df is None or df.empty:
             print(f"No data found in file for Neuron {neuron_id}")
             continue
-        
 
         # Filter for the target global step
         step_data = df[df['global_step'] == target_step]
@@ -71,6 +83,12 @@ def extract_neuron_properties(data_dir, target_step, neuron_area_map):
 
         # Extract the row for the target step
         row = step_data.iloc[0]
+
+        # Check if the columns needed are numeric
+        if pd.isna(row['grown_axons']) or pd.isna(row['grown_dendrites']):
+            print(f"Invalid numeric data for Neuron {neuron_id} at global_step {target_step}, skipping.")
+            continue
+
         records.append({
             'Area': int(area.split('_')[1]),
             'Neuron_ID': neuron_id,
@@ -92,10 +110,10 @@ def extract_neuron_properties(data_dir, target_step, neuron_area_map):
 
 
 
-def plot_combined_parallel_and_box(neuron_df, target_step, simulation,output_dir="plots"):
+def plot_combined_parallel_and_box(neuron_df, target_step, simulation, output_dir="plots"):
     """
     Combines a box plot for Calcium levels by Area and a parallel coordinates plot for averages per Area
-    with normalized column scales and interactive filtering using buttons.
+    with normalized column scales (min to max of each column) and interactive filtering using buttons.
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -119,36 +137,30 @@ def plot_combined_parallel_and_box(neuron_df, target_step, simulation,output_dir
         marker=dict(color="lightblue")
     )
 
+    # Prepare parallel coordinates dimensions with min-max scaling for each column
+    dimensions = [
+        dict(
+            label="Area ID",
+            values=avg_df['Area'].astype(int),
+            range=[avg_df['Area'].astype(int).min(), avg_df['Area'].astype(int).max()]
+        )
+    ]
+
+    for col in numeric_columns:
+        col_min = avg_df[col].min()
+        col_max = avg_df[col].max()
+        dimensions.append(
+            dict(
+                label=col,
+                values=avg_df[col],
+                range=[col_min, col_max]  # Scale each column from its min to max value
+            )
+        )
+
     # Create the parallel coordinates plot
     parcoords_trace = go.Parcoords(
         line=dict(color=avg_df['Calcium'], colorscale='Viridis'),
-        dimensions=[
-            dict(
-                label="Area ID",
-                values=avg_df['Area'].astype(int),
-                range=[avg_df['Area'].astype(int).min(), avg_df['Area'].astype(int).max()]
-            ),
-            dict(
-                label="Calcium",
-                values=avg_df['Calcium'],
-                range=[0, avg_df['Calcium'].max()]  # Scale between 0 and max
-            ),
-            dict(
-                label="Firing Rate",
-                values=avg_df['Firing Rate'],
-                range=[0, avg_df['Firing Rate'].max()]  # Scale between 0 and max
-            ),
-            dict(
-                label="Grown Axons",
-                values=avg_df['Grown Axons'],
-                range=[0, avg_df['Grown Axons'].max()]  # Scale between 0 and max
-            ),
-            dict(
-                label="Grown Dendrites",
-                values=avg_df['Grown Dendrites'],
-                range=[0, avg_df['Grown Dendrites'].max()]  # Scale between 0 and max
-            ),
-        ]
+        dimensions=dimensions
     )
 
     # Combine the two plots
@@ -215,9 +227,9 @@ def plot_combined_parallel_and_box(neuron_df, target_step, simulation,output_dir
         )
     )
 
-    # Update layout with bold and centered titles
+    # Update layout with dark theme and styling
     combined_fig.update_layout(
-        template='plotly_dark',  # Add this line to apply the "plotly_dark" theme
+        template='plotly_dark',
         updatemenus=[
             dict(
                 buttons=buttons,
@@ -229,8 +241,8 @@ def plot_combined_parallel_and_box(neuron_df, target_step, simulation,output_dir
                 yanchor="top",
                 bordercolor="white",
                 borderwidth=1
-        )
-    ],
+            )
+        ],
         annotations=[
             dict(
                 text=f"<b>Neuron Properties @Time step {target_step}</b>",
@@ -257,8 +269,6 @@ def plot_combined_parallel_and_box(neuron_df, target_step, simulation,output_dir
         showlegend=False
     )
 
-
-
     # Save the plot as an HTML file
     output_file = os.path.join(output_dir, f"Box_plot_{simulation}_step_{target_step}.html")
     combined_fig.write_html(output_file)
@@ -268,11 +278,12 @@ def plot_combined_parallel_and_box(neuron_df, target_step, simulation,output_dir
     combined_fig.show()
 
 
+
 # Main execution
-target_step = 100000
+target_step = 0
 simulation = 'no-network'
-data_dir = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simulation}/monitors'
-positions_file = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simulation}/positions/rank_0_positions.txt'
+data_dir = f'/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-{simulation}/monitors'
+positions_file = f'/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-{simulation}/positions/rank_0_positions.txt'
 
 # Change to your desired global step
 
