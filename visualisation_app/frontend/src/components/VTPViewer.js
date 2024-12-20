@@ -518,6 +518,21 @@ const VTPViewer = () => {
             neuronsActor.setMapper(neuronsMapper);
             neuronsMapper.setInputData(neuronsReader.getOutputData(0));
 
+            // Just set up the lookup table for disable visualization
+            if (state.simulationType === SIMULATION_TYPES.DISABLE) {
+              const lut = vtkColorTransferFunction.newInstance();
+              context.current.lookupTables.set('disable', lut);
+              
+              lut.addRGBPoint(0.0, 0.0, 0.0, 0.8);   // Blue for low activity
+              lut.addRGBPoint(0.4, 0.8, 0.0, 0.0);   // Red for medium activity
+              lut.addRGBPoint(0.8, 1.0, 0.0, 0.0);   // Bright red for high activity
+              lut.addRGBPoint(1.0, 1.0, 1.0, 1.0);   // White for disabled areas
+              
+              neuronsMapper.setScalarVisibility(true);
+              neuronsMapper.setLookupTable(lut);
+              neuronsMapper.setScalarRange(0, 1);
+            }
+
             // Store and add neurons actor
             context.current.actors.set('neurons', neuronsActor);
             context.current.renderer.addActor(neuronsActor);
@@ -2967,8 +2982,18 @@ const VTPViewer = () => {
               <span>High</span>
             </Box>
             <Typography variant="caption" sx={{ color: 'white', mt: 1, textAlign: 'center' }}>
-              Activity levels (disabled areas shown in white). The width of the connections is mapped to their weight.
+              Node color shows activity levels (disabled areas shown in white). The width of the connections is mapped to their weight.
             </Typography>
+            {disableViz?.areaData?.get('area_5')?.isDisabled && (
+              <Typography variant="caption" sx={{ color: '#FFFFFF', mt: 0.5, fontWeight: 'bold' }}>
+                Area 5 disabled
+              </Typography>
+            )}
+            {disableViz?.areaData?.get('area_8')?.isDisabled && (
+              <Typography variant="caption" sx={{ color: '#FFFFFF', mt: 0.5, fontWeight: 'bold' }}>
+                Area 8 disabled
+              </Typography>
+            )}
           </Box>
         </ColorLegend>
       )}

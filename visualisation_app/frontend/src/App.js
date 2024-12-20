@@ -17,6 +17,7 @@ import { useVTKState } from './context/VTKContext';
 import { theme } from './theme';
 import NeuronAnalytics from './components/NeuronAnalytics';
 import { Icon } from '@iconify/react';
+import NeuronProperties from './components/NeuronProperties';
 
 const MainContainer = styled(Box)(({ theme }) => ({
   minHeight: '100vh',
@@ -130,6 +131,7 @@ function App() {
                   <ViewerContainer>
                     <VTPViewer />
                   </ViewerContainer>
+                  <NeuronProperties />
                   <NeuronAnalytics />
                 </Box>
               </ViewerLayout>
