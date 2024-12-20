@@ -942,7 +942,7 @@ const VTPViewer = () => {
           // Format label to show BA number instead of area number
           const displayLabel = baId 
             ? `BA ${baId.split('_')[1]}`  // Show "BA X" instead of "area_X"
-            : label.split('_')[1];        // Fallback to area number if no mapping
+            : `BA ${label.split('_')[1]}`; // Always show BA prefix, even for area numbers
 
           // Calculate relative positions (0 to 1) from the center
           const relX = (xy[0] / canvasWidth) - 0.5;
