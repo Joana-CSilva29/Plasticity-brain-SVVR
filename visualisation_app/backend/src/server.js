@@ -62,6 +62,9 @@ app.use('/files', express.static('uploads', {
 // Serve plot files
 app.use('/files/:simulation/plots', express.static('uploads/plots'));
 
+// Add this line to your existing static file serving
+app.use('/files/info', express.static('uploads/info'));
+
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 }); 
