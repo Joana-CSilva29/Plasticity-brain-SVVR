@@ -84,7 +84,7 @@ def create_output_directory(simType):
     Returns:
         str: Path to the created output directory.
     """
-    output_dir = f"/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality/Plasticity-brain-SVVR/visualisation_app/backend/uploads/{simType}/plots"
+    output_dir = f"/Users/sandor/dev/Computational Science/scientific-visualisation-and-virtual-reality/Plasticity-brain-SVVR/visualisation_app/backend/uploads/{simType}/plots"
     os.makedirs(output_dir, exist_ok=True)
     return output_dir
 
@@ -96,10 +96,10 @@ def get_simulation_paths():
         dict: A dictionary mapping simulation types to their respective directories.
     """
     simulations = {
-        'no-network': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality/Project SVVR/viz-no-network/',
-        'disabled': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality/Project SVVR/viz-disable/',
-        'calcium': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality/Project SVVR/viz-calcium/',
-        'stimulus': '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-stimulus/',
+        'no-network': '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-no-network',
+        'disabled': '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-disable',
+        'calcium': '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-calcium',
+        'stimulus': '/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-stimulus',
     }
     return simulations
 

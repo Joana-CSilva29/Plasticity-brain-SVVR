@@ -356,3 +356,5 @@ visualisation_app/backend/uploads/stimulus/plots/plot2_760000.html
 visualisation_app/backend/uploads/stimulus/plots/plot2_770000.html
 visualisation_app/backend/uploads/stimulus/plots/plot2_80000.html
 visualisation_app/backend/uploads/stimulus/plots/plot2_90000.html
+/visualisation_app/venv
+visualisation_app/frontend/.DS_Store
