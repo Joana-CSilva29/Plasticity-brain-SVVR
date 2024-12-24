@@ -166,11 +166,11 @@ def plot_correlation_matrix_ordered(connection_matrix, time_step, simulation, ou
 
 
 simType = 'no-network'  # Change to your simulation type
-positions_file = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simType}/positions/rank_0_positions.txt'
-network_dir = f'/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Project SVVR/viz-{simType}/network'
+positions_file = f'/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-{simType}/positions/rank_0_positions.txt'
+network_dir = f'/Volumes/Extreme SSD/SciVis Project 2023/SciVisContest23/viz-{simType}/network'
 
 
-base_dir = f"/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Plasticity-brain-SVVR/visualisation_app/backend/uploads/{simType}"
+base_dir = f"/Users/sandor/dev/Computational Science/scientific-visualisation-and-virtual-reality/Plasticity-brain-SVVR/visualisation_app/backend/uploads/{simType}"
 plots_dir = os.path.join(base_dir, "plots")
 
 # Create the directories if they don't exist

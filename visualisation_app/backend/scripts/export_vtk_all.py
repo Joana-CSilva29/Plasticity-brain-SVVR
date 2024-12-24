@@ -231,7 +231,7 @@ def process_simulation(sim_name, base_path):
     print(f"Processing simulation: {sim_name}")
     
     # Create output directory
-    base_output_dir = '/Users/joanacostaesilva/Desktop/Scientific Visualization and Virtual Reality /Plasticity-brain-SVVR/visualisation_app/backend/uploads'
+    base_output_dir = '/Users/sandor/dev/Computational Science/scientific-visualisation-and-virtual-reality/Plasticity-brain-SVVR/visualisation_app/backend/uploads'
     sim_dir = os.path.join(base_output_dir, sim_name)
     os.makedirs(sim_dir, exist_ok=True)
 

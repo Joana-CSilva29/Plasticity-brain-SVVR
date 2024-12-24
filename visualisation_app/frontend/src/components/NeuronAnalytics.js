@@ -39,7 +39,7 @@ const PLOT_TYPES = [
   {
     id: 'plot1',
     title: 'Neuron Activity Distribution',
-    height: '600px',
+    height: '1200px',
   },
   {
     id: 'plot2',
@@ -49,9 +49,14 @@ const PLOT_TYPES = [
   {
     id: 'plot3',
     title: 'Temporal Evolution',
-    height: '400px',
+    height: '800px',
+    staticPaths: {
+      'calcium': '/calcium/plots/calcium_analysis.html',
+      'stimulus': '/stimulus/plots/stimulus_analysis.html',
+      'disable': '/disable/plots/disable_analysis.html',
+      'no-network': null
+    }
   },
-  // Add more plot types as needed
 ];
 
 const Plot = ({ plotType, simType, timestep }) => {
@@ -62,6 +67,22 @@ const Plot = ({ plotType, simType, timestep }) => {
   useEffect(() => {
     const checkPlot = async () => {
       setLoading(true);
+      
+      // Handle static paths for plot3
+      if (plotType.id === 'plot3' && plotType.staticPaths) {
+        const staticPath = plotType.staticPaths[simType];
+        if (staticPath === null) {
+          setExists(false);
+          setError(null);
+        } else if (staticPath) {
+          setExists(true);
+          setError(null);
+        }
+        setLoading(false);
+        return;
+      }
+
+      // Regular plot handling for other plots
       const plotUrl = `http://localhost:5000/files/${simType}/plots/${plotType.id}_${timestep}.html`;
       
       try {
@@ -91,12 +112,27 @@ const Plot = ({ plotType, simType, timestep }) => {
     return (
       <Box sx={{ p: 2, textAlign: 'center' }}>
         <Typography sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-          {error || `No ${plotType.title.toLowerCase()} available for this timestep`}
+          {error || "No plot available - please use the scripts to generate it"}
         </Typography>
       </Box>
     );
   }
 
+  // Handle static paths for plot3
+  if (plotType.id === 'plot3' && plotType.staticPaths) {
+    const staticPath = plotType.staticPaths[simType];
+    if (staticPath) {
+      return (
+        <PlotFrame
+          src={`http://localhost:5000/files${staticPath}`}
+          title={plotType.title}
+          style={{ height: plotType.height }}
+        />
+      );
+    }
+  }
+
+  // Regular plot rendering for other plots
   return (
     <PlotFrame
       src={`http://localhost:5000/files/${simType}/plots/${plotType.id}_${timestep}.html`}

@@ -2954,6 +2954,22 @@ const VTPViewer = () => {
             <Typography variant="caption" sx={{ color: 'white', mt: 1, textAlign: 'center' }}>
               Membrane potential (mV). The width of the connections is mapped to their weight.
             </Typography>
+            {/* Add these new status indicators */}
+            {stimulusViz?.areaData?.get('area_8')?.isStimulated && (
+              <Typography variant="caption" sx={{ color: '#FFFFFF', mt: 0.5, fontWeight: 'bold' }}>
+                Area 8 stimulated
+              </Typography>
+            )}
+            {stimulusViz?.areaData?.get('area_30')?.isStimulated && (
+              <Typography variant="caption" sx={{ color: '#FFFFFF', mt: 0.5, fontWeight: 'bold' }}>
+                Area 30 stimulated
+              </Typography>
+            )}
+            {stimulusViz?.areaData?.get('area_34')?.isStimulated && (
+              <Typography variant="caption" sx={{ color: '#FFFFFF', mt: 0.5, fontWeight: 'bold' }}>
+                Area 34 stimulated
+              </Typography>
+            )}
           </Box>
         </ColorLegend>
       )}
